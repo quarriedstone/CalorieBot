@@ -24,6 +24,11 @@ _PORTION_RE = re.compile(
     rf"^\s*(?P<name>.+?)\s+(?P<p>{_NUM}){_SEP}(?P<f>{_NUM}){_SEP}(?P<c>{_NUM})\s*$",
 )
 
+# Скобки вокруг чисел: «экспонента (30/0/6,5)» → «экспонента 30/0/6,5».
+_BRACKET_RE = re.compile(r"[(\[]\s*(?P<inner>[^()\[\]]*?)\s*[)\]]")
+# Внутри скобок допустимы только числа и разделители, иначе это часть названия.
+_NUMERIC_INNER_RE = re.compile(r"[\d\s.,/]+")
+
 # Калорийность макронутриентов (ккал/г).
 CALORIES_PER_PROTEIN = 4.0
 CALORIES_PER_FAT = 9.0
@@ -96,7 +101,7 @@ def totals_from_per100(
 
 def display_name(name: str, weight: float | None = None) -> str:
     """Привести название к виду «Круассан (60 г)»."""
-    cleaned = name.strip().rstrip(".,;:!?")
+    cleaned = name.strip().rstrip(".,;:!?-—–").strip()
     if cleaned:
         label = cleaned[:1].upper() + cleaned[1:]
     else:
@@ -115,14 +120,38 @@ def _to_num(value: str | None) -> float | None:
         return None
 
 
+def _unwrap_brackets(text: str) -> str:
+    """Убрать скобки вокруг чисел: «экспонента (30/0/6,5)» → «... 30/0/6,5».
+
+    Скобки с нечисловым содержимым не трогаем — они могут быть частью названия.
+    """
+
+    def _replace(match: re.Match[str]) -> str:
+        inner = match.group("inner").strip()
+        if not inner or _NUMERIC_INNER_RE.fullmatch(inner) is None:
+            return match.group(0)
+        return f" {inner} "
+
+    return re.sub(r"\s+", " ", _BRACKET_RE.sub(_replace, text)).strip()
+
+
+def numbers_outside_brackets(text: str) -> bool:
+    """Есть ли в тексте числа вне скобок.
+
+    «круассан 60 (10/15/40)» — да (вес снаружи), «экспонента (30 0 6,5)» — нет:
+    такой ввод читается как Б/Ж/У на порцию, а не как вес.
+    """
+    return re.search(r"\d", _BRACKET_RE.sub(" ", text)) is not None
+
+
 def parse_structured(text: str) -> StructuredFood | None:
-    """Разобрать «название вес [Б,Ж,У]».
+    """Разобрать «название вес [Б,Ж,У]".
 
     Возвращает None, если текст не подходит под формат (тогда его обрабатывает
     DeepSeek как свободное описание). Если указан только вес —
     ``per100`` будет None, а КБЖУ подберёт модель.
     """
-    match = _STRUCTURED_RE.match(text)
+    match = _STRUCTURED_RE.match(_unwrap_brackets(text))
     if match is None:
         return None
 
@@ -151,7 +180,7 @@ def parse_portion(text: str) -> PortionFood | None:
 
     Возвращает None, если текст не в этом формате.
     """
-    match = _PORTION_RE.match(text)
+    match = _PORTION_RE.match(_unwrap_brackets(text))
     if match is None:
         return None
 

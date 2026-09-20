@@ -13,6 +13,7 @@ from bot.domain.models import (
 )
 from bot.domain.parsing import (
     display_name,
+    numbers_outside_brackets,
     parse_portion,
     parse_structured,
     totals_from_per100,
@@ -176,12 +177,18 @@ class FoodService:
         Форматы:
         - «название вес Б,Ж,У» — Б/Ж/У на 100 г, пересчёт на указанный вес;
         - «название Б,Ж,У» — Б/Ж/У на всю порцию, вес не указывается.
+        Числа целиком в скобках («экспонента (30 0 6,5)») — это второй формат,
+        даже если запятая в дроби выглядит как разделитель.
 
         Возвращает None, если текст не подходит ни под один формат.
         """
         structured = parse_structured(text)
         per100 = structured.per100 if structured is not None else None
-        if structured is not None and per100 is not None:
+        if (
+            structured is not None
+            and per100 is not None
+            and numbers_outside_brackets(text)
+        ):
             protein_100, fat_100, carbs_100 = per100
             name = display_name(structured.name, structured.weight)
             macros = totals_from_per100(
