@@ -20,7 +20,7 @@ from bot.presentation import keyboards as kb
 from bot.presentation.formatting import (
     GOAL_PROMPT,
     HELP_TEXT,
-    NO_GOAL_TEXT,
+    NO_GOAL_PROMPT,
     SELECT_DAY_PROMPT,
     added_text,
     build_day_text,
@@ -72,10 +72,10 @@ async def _need_day_choice(message: Message, day_service: DayService) -> bool:
 
 
 async def _has_goal(message: Message, user_service: UserService) -> bool:
-    """Без цели КБЖУ считать нечего: просим сначала задать цель."""
+    """Без цели КБЖУ считать нечего: просим сначала создать цель."""
     if await user_service.get_goal(message.from_user.id) is not None:
         return True
-    await message.answer(NO_GOAL_TEXT, reply_markup=kb.main_menu())
+    await message.answer(NO_GOAL_PROMPT, reply_markup=kb.main_menu())
     return False
 
 
@@ -122,7 +122,7 @@ async def goal_input(
 ) -> None:
     goal = parse_goal(message.text or "")
     if goal is None:
-        await message.answer(f"{NO_GOAL_TEXT}\n\n{GOAL_PROMPT}")
+        await message.answer(NO_GOAL_PROMPT)
         return
     await user_service.set_goal(message.from_user.id, goal)
     await state.clear()
