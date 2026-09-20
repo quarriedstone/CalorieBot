@@ -62,11 +62,13 @@ class DeepSeekParser:
             temperature=0.1,
             response_format={"type": "json_object"},
         )
-        content = response.choices[0].message.content or "{}"
+        raw = response.choices[0].message.content
+        logger.info("Сырой ответ DeepSeek на %r: %s", text, raw)
+        content = raw or "{}"
         try:
             data = json.loads(content)
         except json.JSONDecodeError:
-            logger.warning("DeepSeek вернул невалидный JSON: %s", content)
+            logger.warning("Ответ DeepSeek не является валидным JSON")
             data = {}
 
         return {
@@ -79,7 +81,11 @@ class DeepSeekParser:
 
 
 def _to_num(value: Any) -> float:
+    """Число из ответа модели; отсутствующее поле — 0, нечисловое — лог."""
+    if value is None:
+        return 0.0
     try:
         return max(0.0, float(value))
     except (TypeError, ValueError):
+        logger.warning("Не удалось разобрать число из ответа DeepSeek: %r", value)
         return 0.0

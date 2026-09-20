@@ -195,18 +195,15 @@ class FoodService:
     async def add_via_ai(self, user_id: int, text: str) -> AddFoodResult:
         """Распознать свободное описание или «название вес» через DeepSeek.
 
-        Если КБЖУ не определены (все значения нулевые), бросает
-        :class:`FoodNotFoundError` — запись в день не добавляется.
+        Название блюда берётся из ответа модели как есть. Если КБЖУ не
+        определены (все значения нулевые), бросает :class:`FoodNotFoundError` —
+        запись в день не добавляется.
         """
         structured = parse_structured(text)
         weight_hint = structured.weight if structured is not None else None
         parsed = await self._deepseek.parse_food(text, weight_hint=weight_hint)
-        if structured is not None:
-            name = display_name(structured.name, structured.weight)
-        else:
-            name = str(parsed["name"])
         food = Food(
-            name=name,
+            name=str(parsed["name"]),
             calories=float(parsed["calories"]),
             protein=float(parsed["protein"]),
             fat=float(parsed["fat"]),
