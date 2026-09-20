@@ -10,8 +10,8 @@ from aiogram.types import (
 from bot.domain.models import DayInfo, Meal
 
 MENU_GOAL = "🎯 Цель КБЖУ"
-MENU_NEW_DAY = "📅 Новый день"
-MENU_HISTORY = "📜 История"
+MENU_NEW_DAY = "📝 Новая заметка"
+MENU_HISTORY = "📂 Выбрать заметку"
 MENU_DELETE = "🗑 Удалить продукт"
 MENU_PLAN = "ℹ️ Мой план"
 CANCEL = "❌ Отмена"
@@ -46,20 +46,20 @@ def history_menu(days: list[DayInfo]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def day_actions(day_id: int, show_today: bool = False) -> InlineKeyboardMarkup:
-    """Кнопки под карточкой дня: удалить день и возврат к текущему дню."""
+def day_actions(day_id: int) -> InlineKeyboardMarkup:
+    """Кнопки под карточкой заметки: удалить заметку."""
     rows = [
-        [InlineKeyboardButton(text="🗑 Удалить день", callback_data=f"delday:{day_id}")]
+        [
+            InlineKeyboardButton(
+                text="🗑 Удалить заметку", callback_data=f"delday:{day_id}"
+            )
+        ]
     ]
-    if show_today:
-        rows.append(
-            [InlineKeyboardButton(text="↩️ Текущий день", callback_data="today")]
-        )
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def day_delete_confirm(day_id: int) -> InlineKeyboardMarkup:
-    """Подтверждение удаления дня."""
+    """Подтверждение удаления заметки."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -82,7 +82,7 @@ DELETE_PAGE_SIZE = 8
 def delete_menu(day_id: int, meals: list[Meal], page: int = 0) -> InlineKeyboardMarkup:
     """Выбор продукта на удаление: номера идут в обратном порядке.
 
-    Последний продукт дня показывается первым. На странице не больше
+    Последний продукт заметки показывается первым. На странице не больше
     ``DELETE_PAGE_SIZE`` номеров; если записи не поместились, снизу
     появляется широкая кнопка «Далее» — переход к более ранним записям.
     """
