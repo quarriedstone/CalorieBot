@@ -42,11 +42,7 @@ class StructuredFood(BaseModel):
     @property
     def per100(self) -> tuple[float, float, float] | None:
         """Б/Ж/У на 100 г или None, если указаны не все три."""
-        if (
-            self.protein_100 is None
-            or self.fat_100 is None
-            or self.carbs_100 is None
-        ):
+        if self.protein_100 is None or self.fat_100 is None or self.carbs_100 is None:
             return None
         return (self.protein_100, self.fat_100, self.carbs_100)
 
