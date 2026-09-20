@@ -11,6 +11,11 @@ class Macros(BaseModel):
     fat: float
     carbs: float
 
+    @property
+    def is_empty(self) -> bool:
+        """Все значения нулевые — КБЖУ не определены."""
+        return not any((self.calories, self.protein, self.fat, self.carbs))
+
 
 class Food(Macros):
     """Блюдо с названием и КБЖУ."""

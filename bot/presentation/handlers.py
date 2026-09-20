@@ -9,7 +9,12 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 
 from bot.domain.parsing import parse_goal
-from bot.domain.services import DayService, FoodService, UserService
+from bot.domain.services import (
+    DayService,
+    FoodNotFoundError,
+    FoodService,
+    UserService,
+)
 from bot.presentation import keyboards as kb
 from bot.presentation.formatting import (
     GOAL_PROMPT,
@@ -19,6 +24,7 @@ from bot.presentation.formatting import (
     delete_prompt_text,
     deleted_text,
     macros_str,
+    not_found_text,
 )
 
 logger = logging.getLogger(__name__)
@@ -177,6 +183,9 @@ async def add_food(
     processing = await message.answer("Считаю КБЖУ… ⏳")
     try:
         result = await food_service.add_via_ai(message.from_user.id, text)
+    except FoodNotFoundError:
+        await processing.edit_text(not_found_text(text))
+        return
     except Exception:
         logger.exception("Ошибка при обращении к DeepSeek")
         await processing.edit_text("Не удалось распознать блюдо. Попробуйте ещё раз.")

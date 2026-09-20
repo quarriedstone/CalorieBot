@@ -44,6 +44,14 @@ def _meal_from_row(row) -> Meal:
     )
 
 
+class FoodNotFoundError(Exception):
+    """DeepSeek не подобрал КБЖУ для блюда (все значения нулевые)."""
+
+    def __init__(self, query: str) -> None:
+        super().__init__(query)
+        self.query = query
+
+
 class UserService:
     """Работа с пользователем и его целью КБЖУ."""
 
@@ -185,7 +193,11 @@ class FoodService:
         return await self._store(user_id, food)
 
     async def add_via_ai(self, user_id: int, text: str) -> AddFoodResult:
-        """Распознать свободное описание или «название вес» через DeepSeek."""
+        """Распознать свободное описание или «название вес» через DeepSeek.
+
+        Если КБЖУ не определены (все значения нулевые), бросает
+        :class:`FoodNotFoundError` — запись в день не добавляется.
+        """
         structured = parse_structured(text)
         weight_hint = structured.weight if structured is not None else None
         parsed = await self._deepseek.parse_food(text, weight_hint=weight_hint)
@@ -200,6 +212,8 @@ class FoodService:
             fat=float(parsed["fat"]),
             carbs=float(parsed["carbs"]),
         )
+        if food.is_empty:
+            raise FoodNotFoundError(text)
         return await self._store(user_id, food)
 
     async def _store(self, user_id: int, food: Food) -> AddFoodResult:
