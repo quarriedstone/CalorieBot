@@ -46,13 +46,34 @@ def history_menu(days: list[DayInfo]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def day_actions(show_today: bool = False) -> InlineKeyboardMarkup:
-    rows = [[InlineKeyboardButton(text="📅 Новый день", callback_data="newday")]]
+def day_actions(day_id: int, show_today: bool = False) -> InlineKeyboardMarkup:
+    """Кнопки под карточкой дня: удалить день и возврат к текущему дню."""
+    rows = [
+        [InlineKeyboardButton(text="🗑 Удалить день", callback_data=f"delday:{day_id}")]
+    ]
     if show_today:
         rows.append(
             [InlineKeyboardButton(text="↩️ Текущий день", callback_data="today")]
         )
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def day_delete_confirm(day_id: int) -> InlineKeyboardMarkup:
+    """Подтверждение удаления дня."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="✅ Удалить", callback_data=f"deldayok:{day_id}"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="❌ Отмена", callback_data=f"deldayno:{day_id}"
+                )
+            ],
+        ]
+    )
 
 
 DELETE_PAGE_SIZE = 8

@@ -166,6 +166,15 @@ class Database:
         ) as cur:
             return list(await cur.fetchall())
 
+    async def delete_day(self, day_id: int) -> None:
+        """Удалить день вместе с его записями.
+
+        Каскад в SQLite по умолчанию выключен, поэтому записи чистим вручную.
+        """
+        await self.conn.execute("DELETE FROM meals WHERE day_id = ?", (day_id,))
+        await self.conn.execute("DELETE FROM days WHERE id = ?", (day_id,))
+        await self.conn.commit()
+
     # ---------- meals ----------
     async def add_meal(
         self,

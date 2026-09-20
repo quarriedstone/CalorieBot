@@ -11,7 +11,9 @@ HELP_TEXT = (
     "• «овсянка на молоке, 300 ккал» — свободное описание\n\n"
     "День, открытый из истории, становится активным: следующие продукты "
     "сохранятся в него. Вернуться к текущему дню — кнопка «↩️ Текущий день».\n\n"
-    "Удалить лишнюю запись — кнопка «🗑 Удалить продукт».\n\n"
+    "Удалить лишнюю запись — кнопка «🗑 Удалить продукт», целый день — "
+    "«🗑 Удалить день» на карточке дня.\n\n"
+    "Пока день не выбран, продукты не добавляются: выберите день из истории.\n\n"
     "Сначала задайте цель КБЖУ кнопкой «🎯 Цель КБЖУ»."
 )
 
@@ -22,6 +24,8 @@ GOAL_PROMPT = (
 )
 
 DELETE_PROMPT = "🗑 Выберите продукт для удаления:"
+
+SELECT_DAY_PROMPT = "📅 Сначала выберите день — нажмите на нужный день в истории ниже."
 
 
 def fmt(value: float) -> str:
@@ -56,6 +60,19 @@ def added_text(result: AddFoodResult) -> str:
 
 def deleted_text(result: DeleteMealResult) -> str:
     return f"🗑 Удалено: {result.food.name} — {food_str(result.food)}"
+
+
+def confirm_day_delete_text(summary: DaySummary) -> str:
+    """Вопрос перед удалением дня вместе с записями."""
+    return (
+        f"🗑 Удалить день {summary.day.label} вместе со всеми записями?\n"
+        f"Записей: {len(summary.meals)} · итого {macros_str(summary.totals)}\n\n"
+        "Действие нельзя отменить."
+    )
+
+
+def day_deleted_text(label: str) -> str:
+    return f"🗑 День {label} удалён."
 
 
 def not_found_text(query: str) -> str:
