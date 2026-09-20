@@ -44,6 +44,14 @@ def _meal_from_row(row) -> Meal:
     )
 
 
+class FoodNotFoundError(Exception):
+    """DeepSeek не распознал продукт (found=false)."""
+
+    def __init__(self, query: str) -> None:
+        super().__init__(query)
+        self.query = query
+
+
 class UserService:
     """Работа с пользователем и его целью КБЖУ."""
 
@@ -185,16 +193,19 @@ class FoodService:
         return await self._store(user_id, food)
 
     async def add_via_ai(self, user_id: int, text: str) -> AddFoodResult:
-        """Распознать свободное описание или «название вес» через DeepSeek."""
+        """Распознать свободное описание или «название вес» через DeepSeek.
+
+        Название берётся из ответа модели. Если модель вернула found=false
+        (это не продукт питания), бросает :class:`FoodNotFoundError` —
+        запись в день не добавляется.
+        """
         structured = parse_structured(text)
         weight_hint = structured.weight if structured is not None else None
         parsed = await self._deepseek.parse_food(text, weight_hint=weight_hint)
-        if structured is not None:
-            name = display_name(structured.name, structured.weight)
-        else:
-            name = str(parsed["name"])
+        if not parsed["found"]:
+            raise FoodNotFoundError(text)
         food = Food(
-            name=name,
+            name=str(parsed["name"]),
             calories=float(parsed["calories"]),
             protein=float(parsed["protein"]),
             fat=float(parsed["fat"]),

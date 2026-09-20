@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     bot_token: str
     deepseek_api_key: str
     deepseek_base_url: str = "https://api.deepseek.com"
-    deepseek_model: str = "deepseek-chat"
+    deepseek_model: str = "deepseek-flash"
     db_path: str = "data/bot.db"
 
 

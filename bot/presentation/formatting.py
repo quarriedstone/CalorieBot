@@ -57,6 +57,15 @@ def deleted_text(result: DeleteMealResult) -> str:
     return f"🗑 Удалено: {result.food.name} — {food_str(result.food)}"
 
 
+def not_found_text(query: str) -> str:
+    """Продукт не распознан (found=false), запись не добавляется."""
+    return (
+        f"🤷 Продукт не найден: «{query}».\n"
+        "Уточните название и вес — например «круассан 60» — "
+        "или укажите БЖУ на 100 г: «круассан 60 10,15,40»."
+    )
+
+
 def delete_prompt_text(meals: list[Food]) -> str:
     lines = [DELETE_PROMPT, ""]
     lines.extend(f"{i}. {m.name}" for i, m in enumerate(meals, 1))
