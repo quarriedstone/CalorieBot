@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from bot.domain.models import AddFoodResult, DaySummary, Food, Macros
+from bot.domain.models import AddFoodResult, DaySummary, DeleteMealResult, Food, Macros
 
 HELP_TEXT = (
     "Я помогу следить за КБЖУ.\n\n"
@@ -10,15 +10,17 @@ HELP_TEXT = (
     "• «овсянка на молоке, 300 ккал» — свободное описание\n\n"
     "День, открытый из истории, становится активным: следующие продукты "
     "сохранятся в него. Вернуться к текущему дню — кнопка «↩️ Текущий день».\n\n"
+    "Удалить лишнюю запись — кнопка «🗑 Удалить продукт».\n\n"
     "Сначала задайте цель КБЖУ кнопкой «🎯 Цель КБЖУ»."
 )
 
 GOAL_PROMPT = (
-    "Отправьте цель одним сообщением:\n"
-    "• ккал/белки/жиры/углеводы — например 1800/120/60/220\n"
-    "• или только БЖУ — белки/жиры/углеводы, например 120/60/220\n"
-    "Калории во втором случае посчитаю по формуле Б×4 + Ж×9 + У×4."
+    "Отправьте цель одним сообщением — белки/жиры/углеводы, "
+    "например 120/60/220.\n"
+    "Калории посчитаю по формуле Б×4 + Ж×9 + У×4."
 )
+
+DELETE_PROMPT = "🗑 Выберите продукт для удаления:"
 
 
 def fmt(value: float) -> str:
@@ -49,6 +51,18 @@ def added_text(result: AddFoodResult) -> str:
     if not result.is_latest:
         text += f"\n✏️ Записано в день {result.day.label}."
     return text
+
+
+def deleted_text(result: DeleteMealResult) -> str:
+    return f"🗑 Удалено: {result.food.name} — {food_str(result.food)}"
+
+
+def delete_prompt_text(meals: list[Food]) -> str:
+    lines = [DELETE_PROMPT, ""]
+    lines.extend(f"{i}. {m.name}" for i, m in enumerate(meals, 1))
+    lines.append("")
+    lines.append("Нажмите номер продукта на клавиатуре ниже.")
+    return "\n".join(lines)
 
 
 def build_day_text(summary: DaySummary) -> str:

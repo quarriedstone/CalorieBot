@@ -2,7 +2,15 @@ from __future__ import annotations
 
 from datetime import date
 
-from bot.domain.models import AddFoodResult, DayInfo, DaySummary, Food, Macros
+from bot.domain.models import (
+    AddFoodResult,
+    DayInfo,
+    DaySummary,
+    DeleteMealResult,
+    Food,
+    Macros,
+    Meal,
+)
 from bot.domain.parsing import (
     display_name,
     parse_structured,
@@ -25,8 +33,9 @@ def _day_from_row(row) -> DayInfo:
     )
 
 
-def _food_from_row(row) -> Food:
-    return Food(
+def _meal_from_row(row) -> Meal:
+    return Meal(
+        id=int(row["id"]),
         name=str(row["name"]),
         calories=float(row["calories"]),
         protein=float(row["protein"]),
@@ -101,7 +110,7 @@ class DayService:
         if day is None:
             return None
         user_id = int(day["user_id"])
-        meals = [_food_from_row(m) for m in await self._db.get_meals(day_id)]
+        meals = [_meal_from_row(m) for m in await self._db.get_meals(day_id)]
         totals_row = await self._db.get_day_totals(day_id)
         totals = Macros(
             calories=float(totals_row["calories"]),
@@ -116,6 +125,33 @@ class DayService:
             goal=await self._users.get_goal(user_id),
             is_latest=(await self._db.get_latest_day_id(user_id)) == day_id,
         )
+
+    async def get_summary_for_user(
+        self, user_id: int, day_id: int
+    ) -> DaySummary | None:
+        """Сводка дня, если день принадлежит пользователю."""
+        day = await self._db.get_day(day_id)
+        if day is None or int(day["user_id"]) != user_id:
+            return None
+        return await self.get_summary(day_id)
+
+    async def delete_meal(self, user_id: int, meal_id: int) -> DeleteMealResult | None:
+        """Удалить блюдо пользователя и вернуть обновлённую сводку дня.
+
+        Возвращает None, если блюда нет или оно принадлежит чужому дню.
+        """
+        row = await self._db.get_meal(meal_id)
+        if row is None:
+            return None
+        day = await self._db.get_day(int(row["day_id"]))
+        if day is None or int(day["user_id"]) != user_id:
+            return None
+        removed = _meal_from_row(row)
+        await self._db.delete_meal(meal_id)
+        summary = await self.get_summary(int(day["id"]))
+        if summary is None:
+            return None
+        return DeleteMealResult(food=removed, summary=summary)
 
 
 class FoodService:

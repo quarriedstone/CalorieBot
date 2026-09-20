@@ -124,7 +124,7 @@ def parse_structured(text: str) -> StructuredFood | None:
 
 def _goal_numbers(text: str, separators: str) -> list[float] | None:
     parts = [p for p in re.split(separators, text) if p]
-    if len(parts) not in (3, 4):
+    if len(parts) != 3:
         return None
     try:
         return [float(p.replace(",", ".")) for p in parts]
@@ -133,25 +133,23 @@ def _goal_numbers(text: str, separators: str) -> list[float] | None:
 
 
 def parse_goal(text: str) -> Macros | None:
-    """Разобрать цель: «ккал/Б/Ж/У» или только «Б/Ж/У».
+    """Разобрать цель вида «Б/Ж/У», например «120/60/220».
 
-    Возвращает Macros либо None. Если калории не указаны,
-    они считаются по формуле Б×4 + Ж×9 + У×4.
+    Возвращает Macros либо None. Калории считаются по формуле
+    Б×4 + Ж×9 + У×4.
     """
     text = text.strip()
-    # «1800/120/60/220», «120 60 220» — запятая внутри числа = разделитель дробей
+    # «120/60/220», «120 60 220» — запятая внутри числа = разделитель дробей
     values = _goal_numbers(text, r"[\s/|;]+")
     if values is None:
         # «120,60,220» — запятая как разделитель
         values = _goal_numbers(text, r"\s*,\s*")
     if values is None or any(v < 0 for v in values):
         return None
-    if len(values) == 3:
-        protein, fat, carbs = values
-        return Macros(
-            calories=calories_from_macros(protein, fat, carbs),
-            protein=protein,
-            fat=fat,
-            carbs=carbs,
-        )
-    return Macros(calories=values[0], protein=values[1], fat=values[2], carbs=values[3])
+    protein, fat, carbs = values
+    return Macros(
+        calories=calories_from_macros(protein, fat, carbs),
+        protein=protein,
+        fat=fat,
+        carbs=carbs,
+    )
