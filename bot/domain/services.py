@@ -126,14 +126,6 @@ class DayService:
             return False
         return await self.get_selected_day(user_id) is None
 
-    async def back_to_today(self, user_id: int) -> DayInfo:
-        """Сделать активным последний день (кнопка «↩️ Текущий день»)."""
-        day_id = await self._db.get_latest_day_id(user_id)
-        if day_id is None:
-            return await self.get_current_day(user_id)
-        await self._db.set_active_day(user_id, day_id)
-        return _day_from_row(await self._db.get_day(day_id))
-
     async def get_history(self, user_id: int, limit: int = 5) -> list[DayInfo]:
         rows = await self._db.get_last_days(user_id, limit)
         return [_day_from_row(r) for r in rows]
@@ -215,7 +207,7 @@ class FoodService:
         Форматы:
         - «название вес Б,Ж,У» — Б/Ж/У на 100 г, пересчёт на указанный вес;
         - «название Б,Ж,У» — Б/Ж/У на всю порцию, вес не указывается.
-        Числа целиком в скобках («экспонента (30 0 6,5)») — это второй формат,
+        Числа целиком в скобках («Экспонента (30 0 6,5)») — это второй формат,
         даже если запятая в дроби выглядит как разделитель.
 
         Возвращает None, если текст не подходит ни под один формат.

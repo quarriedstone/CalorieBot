@@ -20,6 +20,7 @@ from bot.presentation import keyboards as kb
 from bot.presentation.formatting import (
     GOAL_PROMPT,
     HELP_TEXT,
+    NO_GOAL_PROMPT,
     SELECT_DAY_PROMPT,
     added_text,
     build_day_text,
@@ -50,24 +51,32 @@ def _int_arg(data: str | None, index: int) -> int | None:
 async def _own_summary(
     callback: CallbackQuery, day_service: DayService
 ) -> DaySummary | None:
-    """Сводка дня из callback_data с проверкой владельца."""
+    """Сводка заметки из callback_data с проверкой владельца."""
     day_id = _int_arg(callback.data, 1)
     if day_id is None:
         await callback.answer("Неверный запрос.")
         return None
     summary = await day_service.get_summary_for_user(callback.from_user.id, day_id)
     if summary is None:
-        await callback.answer("День не найден.")
+        await callback.answer("Заметка не найдена.")
     return summary
 
 
 async def _need_day_choice(message: Message, day_service: DayService) -> bool:
-    """Блокирует действие, пока день не выбран заново из истории."""
+    """Блокирует действие, пока заметка не выбрана заново из истории."""
     if not await day_service.needs_day_choice(message.from_user.id):
         return False
     days = await day_service.get_history(message.from_user.id, 5)
     await message.answer(SELECT_DAY_PROMPT, reply_markup=kb.history_menu(days))
     return True
+
+
+async def _has_goal(message: Message, user_service: UserService) -> bool:
+    """Без цели КБЖУ считать нечего: просим сначала создать цель."""
+    if await user_service.get_goal(message.from_user.id) is not None:
+        return True
+    await message.answer(NO_GOAL_PROMPT, reply_markup=kb.main_menu())
+    return False
 
 
 async def _show_day(message: Message, day_service: DayService, day_id: int) -> None:
@@ -76,7 +85,7 @@ async def _show_day(message: Message, day_service: DayService, day_id: int) -> N
         return
     await message.answer(
         build_day_text(summary),
-        reply_markup=kb.day_actions(summary.day.id, show_today=not summary.is_latest),
+        reply_markup=kb.day_actions(summary.day.id),
     )
 
 
@@ -113,7 +122,7 @@ async def goal_input(
 ) -> None:
     goal = parse_goal(message.text or "")
     if goal is None:
-        await message.answer(f"Не понял.\n\n{GOAL_PROMPT}")
+        await message.answer(NO_GOAL_PROMPT)
         return
     await user_service.set_goal(message.from_user.id, goal)
     await state.clear()
@@ -145,14 +154,14 @@ async def show_plan(message: Message, user_service: UserService) -> None:
     )
 
 
-# ---------- Новый день ----------
+# ---------- Новая заметка ----------
 @router.message(F.text == kb.MENU_NEW_DAY, StateFilter(None))
 async def new_day(message: Message, day_service: DayService) -> None:
     day = await day_service.start_new_day(message.from_user.id)
     await _show_day(message, day_service, day.id)
 
 
-# ---------- Удаление дня ----------
+# ---------- Удаление заметки ----------
 @router.callback_query(F.data.startswith("delday:"))
 async def delete_day_ask(callback: CallbackQuery, day_service: DayService) -> None:
     summary = await _own_summary(callback, day_service)
@@ -173,7 +182,7 @@ async def delete_day_cancel(callback: CallbackQuery, day_service: DayService) ->
     await callback.answer("Удаление отменено")
     await callback.message.edit_text(
         build_day_text(summary),
-        reply_markup=kb.day_actions(summary.day.id, show_today=not summary.is_latest),
+        reply_markup=kb.day_actions(summary.day.id),
     )
 
 
@@ -186,32 +195,32 @@ async def delete_day_cb(callback: CallbackQuery, day_service: DayService) -> Non
         return
     day = await day_service.delete_day(user_id, day_id)
     if day is None:
-        await callback.answer("День не найден.")
+        await callback.answer("Заметка не найдена.")
         return
-    await callback.answer("День удалён")
+    await callback.answer("Заметка удалена")
     text = day_deleted_text(day.label)
     days = await day_service.get_history(user_id, 5)
     if not days:
         await callback.message.edit_text(
-            f"{text}\n\nДней пока нет — новый день создастся при добавлении "
-            "продукта или по кнопке «📅 Новый день».",
+            f"{text}\n\nЗаметок пока нет — новая заметка создастся при добавлении "
+            "продукта или по кнопке «📝 Новая заметка».",
             reply_markup=None,
         )
         return
     await callback.message.edit_text(
-        f"{text}\n\nВыберите день заново — из истории:",
+        f"{text}\n\nВыберите заметку заново — из истории:",
         reply_markup=kb.history_menu(days),
     )
 
 
-# ---------- История ----------
+# ---------- Выбор заметки ----------
 @router.message(F.text == kb.MENU_HISTORY, StateFilter(None))
 async def history(message: Message, day_service: DayService) -> None:
     days = await day_service.get_history(message.from_user.id, 5)
     if not days:
-        await message.answer("История пока пуста.", reply_markup=kb.main_menu())
+        await message.answer("Заметок пока нет.", reply_markup=kb.main_menu())
         return
-    await message.answer("Последние дни:", reply_markup=kb.history_menu(days))
+    await message.answer("Последние заметки:", reply_markup=kb.history_menu(days))
 
 
 @router.callback_query(F.data.startswith("day:"))
@@ -222,16 +231,9 @@ async def show_day_cb(callback: CallbackQuery, day_service: DayService) -> None:
         return
     day = await day_service.select_day(callback.from_user.id, day_id)
     if day is None:
-        await callback.answer("День не найден.")
+        await callback.answer("Заметка не найдена.")
         return
-    await callback.answer("Продукты будут добавляться в этот день")
-    await _show_day(callback.message, day_service, day.id)
-
-
-@router.callback_query(F.data == "today")
-async def today_cb(callback: CallbackQuery, day_service: DayService) -> None:
-    day = await day_service.back_to_today(callback.from_user.id)
-    await callback.answer("Возврат к текущему дню")
+    await callback.answer("Продукты будут добавляться в эту заметку")
     await _show_day(callback.message, day_service, day.id)
 
 
@@ -249,6 +251,8 @@ async def add_food(
     food_service: FoodService,
 ) -> None:
     await user_service.register(message.from_user.id, message.from_user.username)
+    if not await _has_goal(message, user_service):
+        return
     if await _need_day_choice(message, day_service):
         return
     text = message.text.strip()
@@ -285,7 +289,7 @@ async def delete_start(message: Message, day_service: DayService) -> None:
     summary = await day_service.get_summary(day.id)
     if summary is None or not summary.meals:
         await message.answer(
-            "За этот день пока нечего удалять.",
+            "В этой заметке пока нечего удалять.",
             reply_markup=kb.main_menu(),
         )
         return
@@ -325,7 +329,5 @@ async def delete_meal_cb(callback: CallbackQuery, day_service: DayService) -> No
     await callback.answer("Продукт удалён")
     await callback.message.edit_text(
         f"{deleted_text(result)}\n\n{build_day_text(result.summary)}",
-        reply_markup=kb.day_actions(
-            result.summary.day.id, show_today=not result.summary.is_latest
-        ),
+        reply_markup=kb.day_actions(result.summary.day.id),
     )
