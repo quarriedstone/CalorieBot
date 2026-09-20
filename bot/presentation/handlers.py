@@ -20,6 +20,7 @@ from bot.presentation import keyboards as kb
 from bot.presentation.formatting import (
     GOAL_PROMPT,
     HELP_TEXT,
+    NO_GOAL_TEXT,
     SELECT_DAY_PROMPT,
     added_text,
     build_day_text,
@@ -70,6 +71,14 @@ async def _need_day_choice(message: Message, day_service: DayService) -> bool:
     return True
 
 
+async def _has_goal(message: Message, user_service: UserService) -> bool:
+    """Без цели КБЖУ считать нечего: просим сначала задать цель."""
+    if await user_service.get_goal(message.from_user.id) is not None:
+        return True
+    await message.answer(NO_GOAL_TEXT, reply_markup=kb.main_menu())
+    return False
+
+
 async def _show_day(message: Message, day_service: DayService, day_id: int) -> None:
     summary = await day_service.get_summary(day_id)
     if summary is None:
@@ -113,7 +122,7 @@ async def goal_input(
 ) -> None:
     goal = parse_goal(message.text or "")
     if goal is None:
-        await message.answer(f"Не понял.\n\n{GOAL_PROMPT}")
+        await message.answer(f"{NO_GOAL_TEXT}\n\n{GOAL_PROMPT}")
         return
     await user_service.set_goal(message.from_user.id, goal)
     await state.clear()
@@ -242,6 +251,8 @@ async def add_food(
     food_service: FoodService,
 ) -> None:
     await user_service.register(message.from_user.id, message.from_user.username)
+    if not await _has_goal(message, user_service):
+        return
     if await _need_day_choice(message, day_service):
         return
     text = message.text.strip()
