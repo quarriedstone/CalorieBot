@@ -13,6 +13,7 @@ from bot.domain.models import (
 )
 from bot.domain.parsing import (
     display_name,
+    parse_portion,
     parse_structured,
     totals_from_per100,
 )
@@ -170,27 +171,38 @@ class FoodService:
         self._deepseek = deepseek
 
     async def try_add_exact(self, user_id: int, text: str) -> AddFoodResult | None:
-        """Точный расчёт «название вес Б,Ж,У» без обращения к API.
+        """Точный расчёт по указанным Б/Ж/У, без обращения к API.
 
-        Возвращает None, если текст не в этом формате.
+        Форматы:
+        - «название вес Б,Ж,У» — Б/Ж/У на 100 г, пересчёт на указанный вес;
+        - «название Б,Ж,У» — Б/Ж/У на всю порцию, вес не указывается.
+
+        Возвращает None, если текст не подходит ни под один формат.
         """
         structured = parse_structured(text)
-        if structured is None or not structured.has_macros:
-            return None
-        macros = totals_from_per100(
-            structured.weight,
-            structured.protein_100,
-            structured.fat_100,
-            structured.carbs_100,
+        per100 = structured.per100 if structured is not None else None
+        if structured is not None and per100 is not None:
+            protein_100, fat_100, carbs_100 = per100
+            name = display_name(structured.name, structured.weight)
+            macros = totals_from_per100(
+                structured.weight, protein_100, fat_100, carbs_100
+            )
+        else:
+            portion = parse_portion(text)
+            if portion is None:
+                return None
+            name = display_name(portion.name)
+            macros = portion.macros
+        return await self._store(
+            user_id,
+            Food(
+                name=name,
+                calories=macros.calories,
+                protein=macros.protein,
+                fat=macros.fat,
+                carbs=macros.carbs,
+            ),
         )
-        food = Food(
-            name=display_name(structured.name, structured.weight),
-            calories=macros.calories,
-            protein=macros.protein,
-            fat=macros.fat,
-            carbs=macros.carbs,
-        )
-        return await self._store(user_id, food)
 
     async def add_via_ai(self, user_id: int, text: str) -> AddFoodResult:
         """Распознать свободное описание или «название вес» через DeepSeek.
