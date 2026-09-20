@@ -18,6 +18,12 @@ _STRUCTURED_RE = re.compile(
     rf"(?:\s+(?P<p>{_NUM}){_SEP}(?P<f>{_NUM}){_SEP}(?P<c>{_NUM}))?\s*$",
 )
 
+# «название Б,Ж,У» — Б/Ж/У сразу на съеденную порцию, вес не указывается,
+# например «експонента 30 0 6.5».
+_PORTION_RE = re.compile(
+    rf"^\s*(?P<name>.+?)\s+(?P<p>{_NUM}){_SEP}(?P<f>{_NUM}){_SEP}(?P<c>{_NUM})\s*$",
+)
+
 # Калорийность макронутриентов (ккал/г).
 CALORIES_PER_PROTEIN = 4.0
 CALORIES_PER_FAT = 9.0
@@ -34,11 +40,33 @@ class StructuredFood(BaseModel):
     carbs_100: float | None = None
 
     @property
-    def has_macros(self) -> bool:
-        return (
-            self.protein_100 is not None
-            and self.fat_100 is not None
-            and self.carbs_100 is not None
+    def per100(self) -> tuple[float, float, float] | None:
+        """Б/Ж/У на 100 г или None, если указаны не все три."""
+        if (
+            self.protein_100 is None
+            or self.fat_100 is None
+            or self.carbs_100 is None
+        ):
+            return None
+        return (self.protein_100, self.fat_100, self.carbs_100)
+
+
+class PortionFood(BaseModel):
+    """Разобранный ввод вида «название Б,Ж,У» — КБЖУ на всю порцию."""
+
+    name: str
+    protein: float
+    fat: float
+    carbs: float
+
+    @property
+    def macros(self) -> Macros:
+        """КБЖУ порции с калориями по формуле Б×4 + Ж×9 + У×4."""
+        return Macros(
+            calories=calories_from_macros(self.protein, self.fat, self.carbs),
+            protein=self.protein,
+            fat=self.fat,
+            carbs=self.carbs,
         )
 
 
@@ -96,7 +124,7 @@ def parse_structured(text: str) -> StructuredFood | None:
 
     Возвращает None, если текст не подходит под формат (тогда его обрабатывает
     DeepSeek как свободное описание). Если указан только вес —
-    ``has_macros`` будет False, а КБЖУ подберёт модель.
+    ``per100`` будет None, а КБЖУ подберёт модель.
     """
     match = _STRUCTURED_RE.match(text)
     if match is None:
@@ -120,6 +148,28 @@ def parse_structured(text: str) -> StructuredFood | None:
         fat_100=fat,
         carbs_100=carbs,
     )
+
+
+def parse_portion(text: str) -> PortionFood | None:
+    """Разобрать «название Б,Ж,У» — Б/Ж/У на всю порцию, без веса.
+
+    Возвращает None, если текст не в этом формате.
+    """
+    match = _PORTION_RE.match(text)
+    if match is None:
+        return None
+
+    name = match.group("name").strip()
+    protein = _to_num(match.group("p"))
+    fat = _to_num(match.group("f"))
+    carbs = _to_num(match.group("c"))
+    if not name or protein is None or fat is None or carbs is None:
+        return None
+    if not any(char.isalpha() for char in name):
+        # «1 2 3 4» — это не название продукта, такой ввод разбирает модель
+        return None
+
+    return PortionFood(name=name, protein=protein, fat=fat, carbs=carbs)
 
 
 def _goal_numbers(text: str, separators: str) -> list[float] | None:
