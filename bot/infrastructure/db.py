@@ -189,6 +189,16 @@ class Database:
         ) as cur:
             return list(await cur.fetchall())
 
+    async def get_meal(self, meal_id: int) -> aiosqlite.Row | None:
+        async with self.conn.execute(
+            "SELECT * FROM meals WHERE id = ?", (meal_id,)
+        ) as cur:
+            return await cur.fetchone()
+
+    async def delete_meal(self, meal_id: int) -> None:
+        await self.conn.execute("DELETE FROM meals WHERE id = ?", (meal_id,))
+        await self.conn.commit()
+
     async def get_day_totals(self, day_id: int) -> dict[str, float]:
         async with self.conn.execute(
             "SELECT COALESCE(SUM(calories), 0) AS calories, "

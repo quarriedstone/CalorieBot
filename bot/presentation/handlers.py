@@ -16,6 +16,8 @@ from bot.presentation.formatting import (
     HELP_TEXT,
     added_text,
     build_day_text,
+    delete_prompt_text,
+    deleted_text,
     macros_str,
 )
 
@@ -182,3 +184,56 @@ async def add_food(
 
     await processing.edit_text(added_text(result))
     await _show_day(message, day_service, result.day.id)
+
+
+# ---------- Удаление продукта ----------
+@router.message(F.text == kb.MENU_DELETE, StateFilter(None))
+async def delete_start(message: Message, day_service: DayService) -> None:
+    day = await day_service.get_current_day(message.from_user.id)
+    summary = await day_service.get_summary(day.id)
+    if summary is None or not summary.meals:
+        await message.answer(
+            "За этот день пока нечего удалять.",
+            reply_markup=kb.main_menu(),
+        )
+        return
+    await message.answer(
+        delete_prompt_text(summary.meals),
+        reply_markup=kb.delete_menu(day.id, summary.meals),
+    )
+
+
+@router.callback_query(F.data.startswith("delpage:"))
+async def delete_page_cb(callback: CallbackQuery, day_service: DayService) -> None:
+    try:
+        _, day_raw, page_raw = callback.data.split(":")
+        day_id, page = int(day_raw), int(page_raw)
+    except ValueError:
+        await callback.answer("Неверный запрос.")
+        return
+    summary = await day_service.get_summary_for_user(callback.from_user.id, day_id)
+    if summary is None or not summary.meals:
+        await callback.answer("Продукты не найдены.")
+        return
+    await callback.answer()
+    await callback.message.edit_reply_markup(
+        reply_markup=kb.delete_menu(day_id, summary.meals, page=page)
+    )
+
+
+@router.callback_query(F.data.startswith("delmeal:"))
+async def delete_meal_cb(callback: CallbackQuery, day_service: DayService) -> None:
+    try:
+        meal_id = int(callback.data.split(":", 1)[1])
+    except ValueError:
+        await callback.answer("Неверный запрос.")
+        return
+    result = await day_service.delete_meal(callback.from_user.id, meal_id)
+    if result is None:
+        await callback.answer("Продукт не найден.")
+        return
+    await callback.answer("Продукт удалён")
+    await callback.message.edit_text(
+        f"{deleted_text(result)}\n\n{build_day_text(result.summary)}",
+        reply_markup=kb.day_actions(show_today=not result.summary.is_latest),
+    )
