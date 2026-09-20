@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "caloriebot"
+version = "0.1.0"
+description = "Telegram-бот для учёта КБЖУ с распознаванием блюд через DeepSeek API"
+authors = ["Herman Tarasau <quarriedstone@gmail.com>"]
+readme = "README.md"
+packages = [{ include = "bot" }]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+aiogram = "^3.13"
+openai = "^1.60"
+pydantic = "^2.11"
+pydantic-settings = "^2.6"
+dependency-injector = "^4.44"
+aiosqlite = "^0.20"
+
+[tool.poetry.group.dev.dependencies]
+ruff = "^0.8"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
