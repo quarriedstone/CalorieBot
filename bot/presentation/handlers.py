@@ -71,11 +71,20 @@ async def _need_day_choice(message: Message, day_service: DayService) -> bool:
     return True
 
 
-async def _has_goal(message: Message, user_service: UserService) -> bool:
-    """Без цели КБЖУ считать нечего: просим сначала создать цель."""
+async def _has_goal(
+    message: Message,
+    user_service: UserService,
+    state: FSMContext,
+) -> bool:
+    """Без цели КБЖУ считать нечего: просим сначала создать цель.
+
+    Сразу переводим диалог в режим ввода цели, чтобы следующее сообщение
+    пользователя было распознано как Б/Ж/У, а не как название продукта.
+    """
     if await user_service.get_goal(message.from_user.id) is not None:
         return True
-    await message.answer(NO_GOAL_PROMPT, reply_markup=kb.main_menu())
+    await state.set_state(GoalState.waiting)
+    await message.answer(NO_GOAL_PROMPT, reply_markup=kb.cancel_menu())
     return False
 
 
@@ -246,12 +255,13 @@ async def show_day_cb(callback: CallbackQuery, day_service: DayService) -> None:
 )
 async def add_food(
     message: Message,
+    state: FSMContext,
     user_service: UserService,
     day_service: DayService,
     food_service: FoodService,
 ) -> None:
     await user_service.register(message.from_user.id, message.from_user.username)
-    if not await _has_goal(message, user_service):
+    if not await _has_goal(message, user_service, state):
         return
     if await _need_day_choice(message, day_service):
         return
