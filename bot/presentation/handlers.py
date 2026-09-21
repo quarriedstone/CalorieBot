@@ -20,6 +20,7 @@ from bot.presentation import keyboards as kb
 from bot.presentation.formatting import (
     GOAL_PROMPT,
     HELP_TEXT,
+    NO_DAY_PROMPT,
     NO_GOAL_PROMPT,
     SELECT_DAY_PROMPT,
     added_text,
@@ -63,10 +64,19 @@ async def _own_summary(
 
 
 async def _need_day_choice(message: Message, day_service: DayService) -> bool:
-    """Блокирует действие, пока заметка не выбрана заново из истории."""
-    if not await day_service.needs_day_choice(message.from_user.id):
+    """Блокирует действие, пока заметка не создана и не выбрана.
+
+    Заметка никогда не создаётся неявно при вводе продукта: первую заметку
+    пользователь создаёт сам кнопкой «📝 Новая заметка». Если заметки есть,
+    но активная не выбрана, предлагаем выбрать её из истории.
+    """
+    user_id = message.from_user.id
+    if await day_service.get_selected_day(user_id) is not None:
         return False
-    days = await day_service.get_history(message.from_user.id, 5)
+    days = await day_service.get_history(user_id, 5)
+    if not days:
+        await message.answer(NO_DAY_PROMPT, reply_markup=kb.main_menu())
+        return True
     await message.answer(SELECT_DAY_PROMPT, reply_markup=kb.history_menu(days))
     return True
 
@@ -211,8 +221,7 @@ async def delete_day_cb(callback: CallbackQuery, day_service: DayService) -> Non
     days = await day_service.get_history(user_id, 5)
     if not days:
         await callback.message.edit_text(
-            f"{text}\n\nЗаметок пока нет — новая заметка создастся при добавлении "
-            "продукта или по кнопке «📝 Новая заметка».",
+            f"{text}\n\nНовая заметка создастся по кнопке «📝 Новая заметка».",
             reply_markup=None,
         )
         return

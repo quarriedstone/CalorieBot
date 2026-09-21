@@ -117,15 +117,6 @@ class DayService:
             return None
         return _day_from_row(day)
 
-    async def needs_day_choice(self, user_id: int) -> bool:
-        """Дни есть, но активный день не выбран — нужно выбрать день заново.
-
-        Если дней нет совсем, ничего не блокируем: первый день создастся сам.
-        """
-        if await self._db.get_latest_day_id(user_id) is None:
-            return False
-        return await self.get_selected_day(user_id) is None
-
     async def get_history(self, user_id: int, limit: int = 5) -> list[DayInfo]:
         rows = await self._db.get_last_days(user_id, limit)
         return [_day_from_row(r) for r in rows]
