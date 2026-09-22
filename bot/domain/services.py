@@ -12,11 +12,13 @@ from bot.domain.models import (
     Meal,
 )
 from bot.domain.parsing import (
+    FoodInput,
+    base_name,
     display_name,
-    numbers_outside_brackets,
-    parse_portion,
-    parse_structured,
+    match_key,
+    parse_food_input,
     totals_from_per100,
+    weight_from_name,
 )
 from bot.infrastructure.db import Database
 from bot.infrastructure.deepseek import DeepSeekParser
@@ -36,6 +38,7 @@ def _day_from_row(row) -> DayInfo:
 
 
 def _meal_from_row(row) -> Meal:
+    weight = row["weight"]
     return Meal(
         id=int(row["id"]),
         name=str(row["name"]),
@@ -43,6 +46,35 @@ def _meal_from_row(row) -> Meal:
         protein=float(row["protein"]),
         fat=float(row["fat"]),
         carbs=float(row["carbs"]),
+        weight=float(weight) if weight is not None else None,
+    )
+
+
+def _meal_weight(meal: Meal) -> float | None:
+    """Вес записи: из колонки или (для старых записей) из названия."""
+    weight = meal.weight if meal.weight is not None else weight_from_name(meal.name)
+    if weight is None or weight <= 0:
+        return None
+    return weight
+
+
+def _scaled(macros: Macros, factor: float) -> Macros:
+    """КБЖУ, умноженное на коэффициент (например, на рост веса порции)."""
+    return Macros(
+        calories=macros.calories * factor,
+        protein=macros.protein * factor,
+        fat=macros.fat * factor,
+        carbs=macros.carbs * factor,
+    )
+
+
+def _sum(left: Macros, right: Macros) -> Macros:
+    """Сумма КБЖУ двух записей."""
+    return Macros(
+        calories=left.calories + right.calories,
+        protein=left.protein + right.protein,
+        fat=left.fat + right.fat,
+        carbs=left.carbs + right.carbs,
     )
 
 
@@ -186,51 +218,41 @@ class DayService:
 
 
 class FoodService:
-    """Добавление блюда: точный расчёт по БЖУ или оценка через DeepSeek."""
+    """Добавление блюда: повтор обновляет запись, иначе — расчёт по БЖУ или DeepSeek."""
 
     def __init__(self, db: Database, deepseek: DeepSeekParser) -> None:
         self._db = db
         self._deepseek = deepseek
 
     async def try_add_exact(self, user_id: int, text: str) -> AddFoodResult | None:
-        """Точный расчёт по указанным Б/Ж/У, без обращения к API.
+        """Добавить блюдо без обращения к модели, если это возможно.
 
-        Форматы:
-        - «название вес Б,Ж,У» — Б/Ж/У на 100 г, пересчёт на указанный вес;
-        - «название Б,Ж,У» — Б/Ж/У на всю порцию, вес не указывается.
-        Числа целиком в скобках («Экспонента (30 0 6,5)») — это второй формат,
-        даже если запятая в дроби выглядит как разделитель.
+        Сначала ищем в активной заметке блюдо с тем же названием: повтор
+        обновляет существующую запись (суммарный вес или ещё одна порция),
+        а не создаёт новую строку. КБЖУ найденной записи используются и для
+        ввода вида «название вес», поэтому модель не вызывается.
 
-        Возвращает None, если текст не подходит ни под один формат.
+        Возвращает None, если КБЖУ без модели не посчитать.
         """
-        structured = parse_structured(text)
-        per100 = structured.per100 if structured is not None else None
-        if (
-            structured is not None
-            and per100 is not None
-            and numbers_outside_brackets(text)
-        ):
-            protein_100, fat_100, carbs_100 = per100
-            name = display_name(structured.name, structured.weight)
-            macros = totals_from_per100(
-                structured.weight, protein_100, fat_100, carbs_100
-            )
-        else:
-            portion = parse_portion(text)
-            if portion is None:
-                return None
-            name = display_name(portion.name)
-            macros = portion.macros
-        return await self._store(
-            user_id,
-            Food(
-                name=name,
-                calories=macros.calories,
-                protein=macros.protein,
-                fat=macros.fat,
-                carbs=macros.carbs,
-            ),
+        food_input = parse_food_input(text)
+        day_id = await self._db.find_target_day(user_id)
+        if day_id is not None:
+            meal = self._match_meal(await self._db.get_meals(day_id), food_input)
+            if meal is not None:
+                return await self._merge(user_id, day_id, meal, food_input)
+
+        macros = food_input.macros
+        if macros is None:
+            # «круассан 60»: КБЖУ подберёт модель (см. add_via_ai)
+            return None
+        food = Food(
+            name=food_input.display or display_name(food_input.name),
+            calories=macros.calories,
+            protein=macros.protein,
+            fat=macros.fat,
+            carbs=macros.carbs,
         )
+        return await self._store(user_id, food, weight=food_input.weight)
 
     async def add_via_ai(self, user_id: int, text: str) -> AddFoodResult:
         """Распознать свободное описание или «название вес» через DeepSeek.
@@ -239,8 +261,7 @@ class FoodService:
         (это не продукт питания), бросает :class:`FoodNotFoundError` —
         запись в день не добавляется.
         """
-        structured = parse_structured(text)
-        weight_hint = structured.weight if structured is not None else None
+        weight_hint = parse_food_input(text).weight
         parsed = await self._deepseek.parse_food(text, weight_hint=weight_hint)
         if not parsed["found"]:
             raise FoodNotFoundError(text)
@@ -251,9 +272,81 @@ class FoodService:
             fat=float(parsed["fat"]),
             carbs=float(parsed["carbs"]),
         )
-        return await self._store(user_id, food)
+        return await self._store(user_id, food, weight=weight_hint)
 
-    async def _store(self, user_id: int, food: Food) -> AddFoodResult:
+    def _match_meal(self, rows, food_input: FoodInput) -> Meal | None:
+        """Последняя запись заметки с тем же названием и того же типа.
+
+        Тип записи — «вес» (вес известен) или «порция» (вес не указан):
+        между собой они не смешиваются, для другого типа создаётся новая строка.
+        """
+        key = food_input.key
+        if not key:
+            return None
+        for row in reversed(rows):
+            meal = _meal_from_row(row)
+            if (_meal_weight(meal) is not None) != food_input.is_weight:
+                continue
+            if match_key(meal.name) == key:
+                return meal
+        return None
+
+    async def _merge(
+        self,
+        user_id: int,
+        day_id: int,
+        meal: Meal,
+        food_input: FoodInput,
+    ) -> AddFoodResult:
+        """Обновить совпавшую запись вместо создания новой."""
+        if food_input.is_weight:
+            stored = _meal_weight(meal) or 0.0
+            total = stored + (food_input.weight or 0.0)
+            if food_input.per100 is not None:
+                # Б/Ж/У на 100 г из свежего сообщения — плотность берём из них
+                macros = totals_from_per100(total, *food_input.per100)
+            else:
+                macros = _scaled(meal, total / stored if stored > 0 else 1.0)
+            name = display_name(base_name(meal.name), total)
+            weight = total
+            added_weight = food_input.weight
+        else:
+            # порция: указанные Б/Ж/У либо (при вводе без чисел) ещё одна такая же
+            macros = _sum(meal, food_input.macros or meal)
+            name = meal.name
+            weight = meal.weight
+            added_weight = None
+
+        await self._db.update_meal(
+            meal.id,
+            name=name,
+            calories=macros.calories,
+            protein=macros.protein,
+            fat=macros.fat,
+            carbs=macros.carbs,
+            weight=weight,
+        )
+        day = await self._db.get_day(day_id)
+        return AddFoodResult(
+            food=Food(
+                name=name,
+                calories=macros.calories,
+                protein=macros.protein,
+                fat=macros.fat,
+                carbs=macros.carbs,
+            ),
+            day=_day_from_row(day),
+            is_latest=(await self._db.get_latest_day_id(user_id)) == day_id,
+            merged=True,
+            added_weight=added_weight,
+        )
+
+    async def _store(
+        self,
+        user_id: int,
+        food: Food,
+        weight: float | None = None,
+    ) -> AddFoodResult:
         day_id = await self._db.get_target_day(user_id, _today())
         await self._db.add_meal(
             day_id,
@@ -262,6 +355,7 @@ class FoodService:
             protein=food.protein,
             fat=food.fat,
             carbs=food.carbs,
+            weight=weight,
         )
         day = await self._db.get_day(day_id)
         return AddFoodResult(

@@ -29,6 +29,12 @@ _BRACKET_RE = re.compile(r"[(\[]\s*(?P<inner>[^()\[\]]*?)\s*[)\]]")
 # Внутри скобок допустимы только числа и разделители, иначе это часть названия.
 _NUMERIC_INNER_RE = re.compile(r"[\d\s.,/]+")
 
+# Вес в хвосте названия: «Круассан (60 г)» или «Круассан 60 г».
+_NAME_WEIGHT_RE = re.compile(
+    r"[(\s]\s*(?P<weight>\d+(?:[.,]\d+)?)\s*г\.?\s*\)?\s*$",
+    re.IGNORECASE,
+)
+
 # Калорийность макронутриентов (ккал/г).
 CALORIES_PER_PROTEIN = 4.0
 CALORIES_PER_FAT = 9.0
@@ -144,6 +150,27 @@ def numbers_outside_brackets(text: str) -> bool:
     return re.search(r"\d", _BRACKET_RE.sub(" ", text)) is not None
 
 
+def weight_from_name(name: str) -> float | None:
+    """Вес из хвоста названия: «Круассан (60 г)» → 60."""
+    match = _NAME_WEIGHT_RE.search(name)
+    if match is None:
+        return None
+    return _to_num(match.group("weight"))
+
+
+def base_name(name: str) -> str:
+    """Название без хвостового веса: «Круассан (60 г)» → «Круассан»."""
+    match = _NAME_WEIGHT_RE.search(name)
+    base = name[: match.start()] if match is not None else name
+    return base.strip().rstrip(".,;:!?-—–").strip()
+
+
+def match_key(name: str) -> str:
+    """Ключ для поиска повторов: название без веса, регистра и лишних пробелов."""
+    base = base_name(name).lower().replace("ё", "е")
+    return re.sub(r"\s+", " ", base).strip(" .,;:!?—-–")
+
+
 def parse_structured(text: str) -> StructuredFood | None:
     """Разобрать «название вес [Б,Ж,У]".
 
@@ -195,6 +222,78 @@ def parse_portion(text: str) -> PortionFood | None:
         return None
 
     return PortionFood(name=name, protein=protein, fat=fat, carbs=carbs)
+
+
+class FoodInput(BaseModel):
+    """Разобранный ввод еды: название, вес, КБЖУ (если считаются локально).
+
+    ``weight`` известен только тогда, когда вес указан в самом сообщении;
+    ``macros`` — только когда КБЖУ не требует обращения к модели;
+    ``per100`` — явные Б/Ж/У на 100 г (используются при объединении повторов).
+    """
+
+    name: str
+    weight: float | None = None
+    macros: Macros | None = None
+    per100: tuple[float, float, float] | None = None
+    display: str | None = None
+
+    @property
+    def key(self) -> str:
+        """Ключ для поиска такого же блюда в заметке."""
+        return match_key(self.name)
+
+    @property
+    def is_weight(self) -> bool:
+        """Указан ли вес порции (иначе ввод считается «порцией»)."""
+        return self.weight is not None
+
+
+def parse_food_input(text: str) -> FoodInput:
+    """Разобрать ввод еды в объединённый вид, не обращаясь к модели.
+
+    Порядок разбора: «название вес Б,Ж,У» → «название Б,Ж,У» → «название вес» →
+    название с весом в скобках → свободный текст. Для свободного текста
+    ``macros`` и ``weight`` пустые: это описание разбирает модель.
+    """
+    structured = parse_structured(text)
+    per100 = structured.per100 if structured is not None else None
+    if structured is not None and per100 is not None and numbers_outside_brackets(text):
+        return FoodInput(
+            name=structured.name,
+            weight=structured.weight,
+            macros=totals_from_per100(structured.weight, *per100),
+            per100=per100,
+            display=display_name(structured.name, structured.weight),
+        )
+
+    portion = parse_portion(text)
+    if portion is not None:
+        return FoodInput(
+            name=portion.name,
+            macros=portion.macros,
+            display=display_name(portion.name),
+        )
+
+    if structured is not None:
+        # «название вес»: КБЖУ подберёт модель либо возьмёт из совпавшей записи
+        return FoodInput(
+            name=structured.name,
+            weight=structured.weight,
+            display=display_name(structured.name, structured.weight),
+        )
+
+    raw = text.strip()
+    weight = weight_from_name(raw)
+    base = base_name(raw) if weight is not None else raw
+    if weight is not None and any(char.isalpha() for char in base):
+        # «овсянка (300 г)»: вес указан в скобках, КБЖУ подберёт модель
+        return FoodInput(
+            name=base,
+            weight=weight,
+            display=display_name(base, weight),
+        )
+    return FoodInput(name=raw)
 
 
 def _goal_numbers(text: str, separators: str) -> list[float] | None:

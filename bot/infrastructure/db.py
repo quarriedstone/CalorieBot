@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS meals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     day_id INTEGER NOT NULL REFERENCES days(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
+    weight REAL,
     calories REAL NOT NULL DEFAULT 0,
     protein REAL NOT NULL DEFAULT 0,
     fat REAL NOT NULL DEFAULT 0,
@@ -54,12 +55,18 @@ class Database:
 
     async def _migrate(self) -> None:
         """Добавить недостающие колонки в уже существующую БД."""
-        async with self.conn.execute("PRAGMA table_info(users)") as cur:
-            columns = {row["name"] for row in await cur.fetchall()}
-        if "active_day_id" not in columns:
-            await self.conn.execute(
-                "ALTER TABLE users ADD COLUMN active_day_id INTEGER"
-            )
+        await self._add_missing_columns("users", {"active_day_id": "INTEGER"})
+        await self._add_missing_columns("meals", {"weight": "REAL"})
+
+    async def _add_missing_columns(self, table: str, columns: dict[str, str]) -> None:
+        """Добавить колонки ``columns`` (имя → тип), которых нет в таблице."""
+        async with self.conn.execute(f"PRAGMA table_info({table})") as cur:
+            existing = {row["name"] for row in await cur.fetchall()}
+        for name, column_type in columns.items():
+            if name not in existing:
+                await self.conn.execute(
+                    f"ALTER TABLE {table} ADD COLUMN {name} {column_type}"
+                )
 
     async def shutdown(self) -> None:
         if self._conn is not None:
@@ -138,20 +145,24 @@ class Database:
             row = await cur.fetchone()
         return int(row["id"]) if row is not None else None
 
-    async def get_current_day(self, user_id: int, day: str) -> int:
-        latest = await self.get_latest_day_id(user_id)
-        if latest is not None:
-            return latest
+    async def get_target_day(self, user_id: int, day: str) -> int:
+        """День для добавления продуктов: выбранный в истории или последний.
+
+        Если дней нет совсем, создаёт новый.
+        """
+        found = await self.find_target_day(user_id)
+        if found is not None:
+            return found
         return await self.create_day(user_id, day)
 
-    async def get_target_day(self, user_id: int, day: str) -> int:
-        """День для добавления продуктов: выбранный в истории или последний."""
+    async def find_target_day(self, user_id: int) -> int | None:
+        """День для добавления продуктов, не создавая его."""
         user = await self.get_user(user_id)
         if user is not None and user["active_day_id"] is not None:
             selected = await self.get_day(int(user["active_day_id"]))
             if selected is not None and int(selected["user_id"]) == user_id:
                 return int(selected["id"])
-        return await self.get_current_day(user_id, day)
+        return await self.get_latest_day_id(user_id)
 
     async def get_day(self, day_id: int) -> aiosqlite.Row | None:
         async with self.conn.execute(
@@ -184,11 +195,30 @@ class Database:
         protein: float,
         fat: float,
         carbs: float,
+        weight: float | None = None,
     ) -> None:
         await self.conn.execute(
-            "INSERT INTO meals (day_id, name, calories, protein, fat, carbs) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (day_id, name, calories, protein, fat, carbs),
+            "INSERT INTO meals (day_id, name, weight, calories, protein, fat, carbs) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (day_id, name, weight, calories, protein, fat, carbs),
+        )
+        await self.conn.commit()
+
+    async def update_meal(
+        self,
+        meal_id: int,
+        name: str,
+        calories: float,
+        protein: float,
+        fat: float,
+        carbs: float,
+        weight: float | None,
+    ) -> None:
+        """Перезаписать запись: повтор блюда обновляет её, а не дублирует."""
+        await self.conn.execute(
+            "UPDATE meals SET name = ?, weight = ?, calories = ?, protein = ?, "
+            "fat = ?, carbs = ? WHERE id = ?",
+            (name, weight, calories, protein, fat, carbs, meal_id),
         )
         await self.conn.commit()
 

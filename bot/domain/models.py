@@ -22,6 +22,7 @@ class Meal(Food):
     """Блюдо из таблицы дня: КБЖУ и идентификатор записи в БД."""
 
     id: int
+    weight: float | None = None
 
 
 class DayInfo(BaseModel):
@@ -44,11 +45,17 @@ class DaySummary(BaseModel):
 
 
 class AddFoodResult(BaseModel):
-    """Результат добавления блюда."""
+    """Результат добавления блюда.
+
+    ``merged`` — блюдо уже было в заметке, и запись обновлена: ``added_weight``
+    содержит добавленный вес (None — к существующей записи добавлена порция).
+    """
 
     food: Food
     day: DayInfo
     is_latest: bool
+    merged: bool = False
+    added_weight: float | None = None
 
 
 class DeleteMealResult(BaseModel):

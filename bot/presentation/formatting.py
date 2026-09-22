@@ -12,6 +12,9 @@ HELP_TEXT = (
     "(для 60 г посчитаю сам)\n"
     "• «Экспонента 30 0 6.5» — продукт с итоговыми БЖУ на всю порцию "
     "(калории посчитаю сам)\n\n"
+    "Повторы не дублируются: если такое блюдо уже есть в заметке, я обновлю "
+    "запись — при указанном весе прибавлю его к прежнему («круассан 60» дважды "
+    "даст «Круассан (120 г)»), а без веса прибавлю ещё одну порцию.\n\n"
     "По кнопке «📂 Выбрать заметку» выбранная заметка становится активной: "
     "следующие продукты сохранятся в неё.\n\n"
     "Удалить лишнюю запись — кнопка «🗑 Удалить продукт», всю заметку — "
@@ -64,7 +67,15 @@ def food_str(f: Food) -> str:
 
 
 def added_text(result: AddFoodResult) -> str:
-    text = f"✅ Добавлено: {result.food.name} — {food_str(result.food)}"
+    if result.merged:
+        added = (
+            f" (+{fmt(result.added_weight)} г)"
+            if result.added_weight is not None
+            else " (+1 порция)"
+        )
+        text = f"🔄 Обновлено: {result.food.name} — {food_str(result.food)}{added}"
+    else:
+        text = f"✅ Добавлено: {result.food.name} — {food_str(result.food)}"
     if not result.is_latest:
         text += f"\n✏️ Записано в заметку {result.day.label}."
     return text
