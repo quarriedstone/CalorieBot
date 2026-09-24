@@ -1,12 +1,11 @@
-import os
 from logging.config import fileConfig
-from pathlib import Path
 
 from dotenv import load_dotenv
 from sqlalchemy import engine_from_config, pool
 
 from alembic import context
 from bot.infrastructure.models import Base
+from bot.settings import SqliteSettings
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -17,16 +16,13 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Путь к БД берём из того же окружения, что и приложение (DB_PATH, см. bot/config.py),
-# чтобы миграции не зависели от секретов бота: .env читаем сами, без pydantic-settings.
-#
-# Драйвер — синхронный sqlite:/// (тот же файл БД, что у приложения через aiosqlite):
-# alembic — консольная утилита, async-движок тут ни к чему и требовал бы greenlet.
+# Путь к БД берём из тех же настроек, что и приложение (SqliteSettings читает DB_PATH),
+# чтобы миграции не зависели от секретов бота: тут нет ни bot_token, ни ключей DeepSeek.
 load_dotenv()
-config.set_main_option(
-    "sqlalchemy.url",
-    f"sqlite:///{Path(os.getenv('DB_PATH', 'data/bot.db')).as_posix()}",
-)
+
+# Драйвер — синхронный sqlite:/// (тот же файл БД, что у приложения через aiosqlite):
+# alembic — консольная утилита, async-движок тут ни к чему.
+config.set_main_option("sqlalchemy.url", SqliteSettings().sync_url)
 
 # Схема описана моделями таблиц (bot/infrastructure/models) — их metadata
 # и есть источник правды для autogenerate.

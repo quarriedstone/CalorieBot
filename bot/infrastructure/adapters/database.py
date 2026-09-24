@@ -1,48 +1,48 @@
-"""Адаптер SQLite: SQLAlchemy поверх aiosqlite."""
+"""Адаптер базы данных: SQLAlchemy поверх aiosqlite."""
 
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from sqlalchemy import delete, func, insert, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
     AsyncSession,
     async_sessionmaker,
-    create_async_engine,
 )
-from sqlalchemy.pool import NullPool
 
 from bot.domain.models import DayInfo, Food, Macros, Meal, User
 from bot.domain.services.interfaces import DatabaseInterface
 from bot.infrastructure import models as tables
 
 
-class SqliteAdapter(DatabaseInterface):
-    """Адаптер поверх SQLite (SQLAlchemy + aiosqlite).
+class DatabaseAdapter(DatabaseInterface):
+    """Адаптер базы данных поверх SQLAlchemy (aiosqlite).
 
     Долгоживущего соединения нет: ``NullPool`` плюс сессия на один запрос —
     соединение открывается на время метода и закрывается на выходе. Запросы
     собираются из моделей таблиц (:mod:`bot.infrastructure.models`), SQL руками
-    не пишется. Схемой владеет Alembic (``alembic upgrade head``): адаптер
-    не создаёт таблицы и не меняет их структуру, только читает и пишет данные.
+    не пишется. Атрибуты таблиц названы как поля доменных моделей, поэтому
+    строка превращается в модель через ``model_validate(..., from_attributes=True)``.
+    Схемой владеет Alembic (``alembic upgrade head``): адаптер не создаёт таблицы
+    и не меняет их структуру, только читает и пишет данные.
+
+    Движок приходит готовым (его собирает контейнер из :class:`SqliteSettings`):
+    адаптер не знает ни про путь к файлу БД, ни про драйвер.
     """
 
-    def __init__(self, path: str) -> None:
-        engine = create_async_engine(
-            f"sqlite+aiosqlite:///{Path(path).as_posix()}", poolclass=NullPool
-        )
+    def __init__(self, engine: AsyncEngine) -> None:
         self._sessions = async_sessionmaker(engine, expire_on_commit=False)
 
     # ---------- users ----------
     async def upsert_user(self, user_id: int, username: str | None) -> None:
-        stmt = sqlite_insert(tables.User).values(user_id=user_id, username=username)
+        stmt = sqlite_insert(tables.User).values(id=user_id, username=username)
         async with self._session() as session:
             await session.execute(
                 stmt.on_conflict_do_update(
-                    index_elements=[tables.User.user_id],
+                    index_elements=[tables.User.id],
                     set_={"username": stmt.excluded.username},
                 )
             )
@@ -52,16 +52,16 @@ class SqliteAdapter(DatabaseInterface):
         async with self._session() as session:
             row = (
                 await session.scalars(
-                    select(tables.User).where(tables.User.user_id == user_id)
+                    select(tables.User).where(tables.User.id == user_id)
                 )
             ).one_or_none()
-        return None if row is None else self._user_from_row(row)
+        return None if row is None else User.model_validate(row, from_attributes=True)
 
     async def set_goal(self, user_id: int, goal: Macros) -> None:
         async with self._session() as session:
             await session.execute(
                 update(tables.User)
-                .where(tables.User.user_id == user_id)
+                .where(tables.User.id == user_id)
                 .values(
                     goal_calories=goal.calories,
                     goal_protein=goal.protein,
@@ -76,7 +76,7 @@ class SqliteAdapter(DatabaseInterface):
         async with self._session() as session:
             await session.execute(
                 update(tables.User)
-                .where(tables.User.user_id == user_id)
+                .where(tables.User.id == user_id)
                 .values(active_day_id=day_id)
             )
             await session.commit()
@@ -90,12 +90,12 @@ class SqliteAdapter(DatabaseInterface):
             count = await session.scalar(
                 select(func.count())
                 .select_from(tables.Day)
-                .where(tables.Day.user_id == user_id, tables.Day.day == day)
+                .where(tables.Day.user_id == user_id, tables.Day.date == day)
             )
             label = day if not count else f"{day} ({count + 1})"
             day_id = await session.scalar(
                 insert(tables.Day)
-                .values(user_id=user_id, day=day, label=label)
+                .values(user_id=user_id, date=day, label=label)
                 .returning(tables.Day.id)
             )
             await session.commit()
@@ -125,7 +125,7 @@ class SqliteAdapter(DatabaseInterface):
             row = (
                 await session.scalars(select(tables.Day).where(tables.Day.id == day_id))
             ).one_or_none()
-        return None if row is None else self._day_from_row(row)
+        return None if row is None else DayInfo.model_validate(row, from_attributes=True)
 
     async def get_last_days(self, user_id: int, limit: int = 5) -> list[DayInfo]:
         async with self._session() as session:
@@ -137,7 +137,7 @@ class SqliteAdapter(DatabaseInterface):
                     .limit(limit)
                 )
             ).all()
-        return [self._day_from_row(row) for row in rows]
+        return [DayInfo.model_validate(row, from_attributes=True) for row in rows]
 
     async def delete_day(self, day_id: int) -> None:
         """Удалить день вместе с его записями.
@@ -175,7 +175,7 @@ class SqliteAdapter(DatabaseInterface):
                     .order_by(tables.Meal.id)
                 )
             ).all()
-        return [self._meal_from_row(row) for row in rows]
+        return [Meal.model_validate(row, from_attributes=True) for row in rows]
 
     async def get_meal(self, meal_id: int) -> Meal | None:
         async with self._session() as session:
@@ -184,7 +184,7 @@ class SqliteAdapter(DatabaseInterface):
                     select(tables.Meal).where(tables.Meal.id == meal_id)
                 )
             ).one_or_none()
-        return None if row is None else self._meal_from_row(row)
+        return None if row is None else Meal.model_validate(row, from_attributes=True)
 
     async def delete_meal(self, meal_id: int) -> None:
         async with self._session() as session:
@@ -229,43 +229,3 @@ class SqliteAdapter(DatabaseInterface):
         current = await self.get_day(latest)
         assert current is not None, "Последний день не найден в БД"
         return current
-
-    @staticmethod
-    def _user_from_row(row: tables.User) -> User:
-        goal = (
-            None
-            if row.goal_calories is None
-            else Macros(
-                calories=row.goal_calories,
-                protein=row.goal_protein or 0,
-                fat=row.goal_fat or 0,
-                carbs=row.goal_carbs or 0,
-            )
-        )
-        return User(
-            id=row.user_id,
-            username=row.username,
-            goal=goal,
-            active_day_id=row.active_day_id,
-        )
-
-    @staticmethod
-    def _day_from_row(row: tables.Day) -> DayInfo:
-        return DayInfo(
-            id=row.id,
-            user_id=row.user_id,
-            date=row.day,
-            label=row.label,
-        )
-
-    @staticmethod
-    def _meal_from_row(row: tables.Meal) -> Meal:
-        return Meal(
-            id=row.id,
-            day_id=row.day_id,
-            name=row.name,
-            calories=row.calories,
-            protein=row.protein,
-            fat=row.fat,
-            carbs=row.carbs,
-        )

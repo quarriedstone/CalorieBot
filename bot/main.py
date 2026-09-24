@@ -4,7 +4,6 @@ import logging
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 
-from bot.config import settings
 from bot.container import AppContainer
 from bot.presentation.handlers import router
 from bot.presentation.middleware import ContainerMiddleware
@@ -17,7 +16,7 @@ async def main() -> None:
     )
 
     container = AppContainer()
-    bot = Bot(token=settings.bot_token)
+    bot = Bot(token=container.app_settings().bot_token)
     dp = Dispatcher(storage=MemoryStorage())
     dp.update.outer_middleware(ContainerMiddleware(container))
     dp.include_router(router)

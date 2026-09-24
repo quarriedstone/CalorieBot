@@ -93,8 +93,11 @@ docker compose run --rm migrate    # накатить миграции вруч�
 ```
 bot/
   main.py                    # точка входа: контейнер, middleware, polling
-  config.py                  # настройки из переменных окружения (.env)
-  container.py               # Container — сборка адаптеров и сервисов
+  settings/                  # настройки по подсистемам
+    config.py                # AppSettings — общие настройки (BOT_TOKEN)
+    deepseek.py              # DeepSeekSettings — ключ, base_url, модель
+    databases/sqlite.py      # SqliteSettings — путь (DB_PATH) и URL для SQLAlchemy
+  container.py               # Container — настройки, engine БД, сборка адаптеров и сервисов
   domain/                    # бизнес-логика
     models.py                # модели: Macros, Food, Meal, DayInfo, User, DaySummary, …
     parsing.py               # разбор цели и форматов ввода, пересчёт КБЖУ
@@ -106,13 +109,13 @@ bot/
       interfaces/
         database.py          # DatabaseInterface — порт хранилища
   infrastructure/            # адаптеры к внешним зависимостям
-    models/                  # SQLAlchemy-модели таблиц (metadata для Alembic и запросы)
+    models/                  # SQLAlchemy-модели таблиц (metadata для Alembic и запросы адаптера)
       base.py                # Base
       user.py                # users
       day.py                 # days
       meal.py                # meals
     adapters/
-      databases/sqlite.py    # SQLAlchemy поверх aiosqlite — реализация DatabaseInterface
+      databases/sqlite.py    # DatabaseAdapter — SQLAlchemy-сессии на готовом engine (порт DatabaseInterface)
       deepseek.py            # DeepSeek API
   presentation/              # работа с Telegram
     handlers.py              # Router и обработчики сообщений/callback'ов
@@ -120,7 +123,7 @@ bot/
     formatting.py            # форматирование вывода
     middleware.py            # инъекция сервисов из контейнера
 alembic/                     # миграции схемы БД
-  env.py                     # DB_PATH → sqlite:///, target_metadata из models
+  env.py                     # sqlalchemy.url из SqliteSettings, target_metadata из models
   versions/                  # файлы миграций
 alembic.ini                  # настройки Alembic
 docker-compose.yml           # сервисы: migrate (миграции) и caloriebot (бот)
