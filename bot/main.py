@@ -17,7 +17,7 @@ async def main() -> None:
     )
 
     container = AppContainer()
-    db = container.db_path()
+    db = container.sqlite_adapter()
     await db.init()
 
     bot = Bot(token=settings.bot_token)

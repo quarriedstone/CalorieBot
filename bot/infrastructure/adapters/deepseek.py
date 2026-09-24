@@ -93,7 +93,7 @@ FOOD_ESTIMATE_FORMAT: ResponseFormatTextJSONSchemaConfigParam = {
 }
 
 
-class DeepSeekParser:
+class DeepSeekAdapter:
     """Адаптер к DeepSeek API (OpenAI-совместимый клиент)."""
 
     def __init__(

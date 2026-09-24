@@ -4,6 +4,8 @@ from pathlib import Path
 
 import aiosqlite
 
+from bot.domain.services.interfaces import DatabaseInterface
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     user_id INTEGER PRIMARY KEY,
@@ -37,8 +39,8 @@ CREATE TABLE IF NOT EXISTS meals (
 """
 
 
-class Database:
-    """Адаптер поверх SQLite (aiosqlite)."""
+class SqliteAdapter(DatabaseInterface):
+    """Адаптер поверх SQLite (aiosqlite), реализует :class:`DatabaseInterface`."""
 
     def __init__(self, path: str) -> None:
         self._path = path
@@ -118,6 +120,7 @@ class Database:
             (user_id, day),
         ) as cur:
             row = await cur.fetchone()
+        assert row is not None, "COUNT(*) не вернул строку"
         return int(row["c"])
 
     async def create_day(self, user_id: int, day: str) -> int:
@@ -128,6 +131,7 @@ class Database:
             (user_id, day, label),
         )
         await self.conn.commit()
+        assert cur.lastrowid is not None, "SQLite не вернул id созданного дня"
         return int(cur.lastrowid)
 
     async def get_latest_day_id(self, user_id: int) -> int | None:
@@ -218,6 +222,7 @@ class Database:
             (day_id,),
         ) as cur:
             row = await cur.fetchone()
+        assert row is not None, "SUM() не вернул строку"
         return {
             "calories": float(row["calories"]),
             "protein": float(row["protein"]),
