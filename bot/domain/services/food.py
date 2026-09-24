@@ -10,7 +10,7 @@ from bot.domain.parsing import (
     parse_structured,
     totals_from_per100,
 )
-from bot.domain.services.common import day_from_row, today
+from bot.domain.services.common import today
 from bot.domain.services.interfaces import DatabaseInterface
 from bot.infrastructure.adapters.deepseek import DeepSeekAdapter
 
@@ -94,19 +94,10 @@ class FoodService:
         return await self._store(user_id, food)
 
     async def _store(self, user_id: int, food: Food) -> AddFoodResult:
-        day_id = await self._db.get_target_day(user_id, today())
-        await self._db.add_meal(
-            day_id,
-            name=food.name,
-            calories=food.calories,
-            protein=food.protein,
-            fat=food.fat,
-            carbs=food.carbs,
-        )
-        day = await self._db.get_day(day_id)
-        assert day is not None, "Целевой день не найден в БД"
+        day = await self._db.get_target_day(user_id, today())
+        await self._db.add_meal(day.id, food)
         return AddFoodResult(
             food=food,
-            day=day_from_row(day),
-            is_latest=(await self._db.get_latest_day_id(user_id)) == day_id,
+            day=day,
+            is_latest=(await self._db.get_latest_day_id(user_id)) == day.id,
         )

@@ -19,9 +19,10 @@ class Food(Macros):
 
 
 class Meal(Food):
-    """Блюдо из таблицы дня: КБЖУ и идентификатор записи в БД."""
+    """Блюдо из таблицы дня: КБЖУ, id записи и день, к которому она относится."""
 
     id: int
+    day_id: int
 
 
 class DayInfo(BaseModel):
@@ -31,6 +32,15 @@ class DayInfo(BaseModel):
     user_id: int
     date: str
     label: str
+
+
+class User(BaseModel):
+    """Пользователь: имя, цель КБЖУ и выбранный день."""
+
+    id: int
+    username: str | None = None
+    goal: Macros | None = None
+    active_day_id: int | None = None
 
 
 class DaySummary(BaseModel):

@@ -2,6 +2,6 @@
 
 from __future__ import annotations
 
-from bot.domain.services.interfaces.database import DatabaseInterface, Row
+from bot.domain.services.interfaces.database import DatabaseInterface
 
-__all__ = ["DatabaseInterface", "Row"]
+__all__ = ["DatabaseInterface"]

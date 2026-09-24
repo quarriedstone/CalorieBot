@@ -36,6 +36,7 @@ Telegram-бот для учёта КБЖУ. Бот распознаёт блюд
 - [dependency-injector](https://python-dependency-injector.ets-labs.org/) — DI-контейнер
 - [OpenAI SDK](https://platform.deepseek.com/) — клиент к DeepSeek API (Responses API, модель `deepseek-flash`)
 - SQLite (aiosqlite) — хранение данных
+- [Alembic](https://alembic.sqlalchemy.org/) — миграции схемы БД
 - Docker
 
 ## Локальный запуск
@@ -47,7 +48,10 @@ cp .env.example .env
 # 2. Установить зависимости
 poetry install
 
-# 3. Запустить бота
+# 3. Накатить миграции (создаст таблицы и alembic_version)
+poetry run alembic upgrade head
+
+# 4. Запустить бота
 poetry run python -m bot.main
 ```
 
@@ -55,6 +59,7 @@ poetry run python -m bot.main
 > ```bash
 > .venv\Scripts\python -m pip install poetry   # Windows
 > .venv\Scripts\poetry install
+> .venv\Scripts\poetry run alembic upgrade head
 > .venv\Scripts\poetry run python -m bot.main
 > ```
 
@@ -67,11 +72,20 @@ cp .env.example .env
 # 2. (опционально, для воспроизводимых сборок) зафиксировать зависимости
 poetry lock
 
-# 3. Собрать и запустить
+# 3. Собрать и запустить: сначала сервис migrate накатит миграции, потом стартует бот
 docker compose up -d --build
 ```
 
-Данные (SQLite) хранятся в Docker volume `bot_data`.
+Данные (SQLite) хранятся в Docker volume `bot_data` — он общий для обоих сервисов.
+Миграции накатывает отдельный сервис `migrate`: он выполняет `alembic upgrade head`
+и завершается, а бот стартует только после его успеха (`depends_on:
+service_completed_successfully`). Повторный запуск безопасен — применённые миграции
+пропускаются.
+
+```bash
+docker compose logs migrate        # что накатилось
+docker compose run --rm migrate    # накатить миграции вручную
+```
 
 ## Структура проекта
 
@@ -81,15 +95,27 @@ bot/
   config.py                  # настройки из переменных окружения (.env)
   container.py               # Container — сборка адаптеров и сервисов
   domain/                    # бизнес-логика
-    models.py                # Macros, Food, DayInfo, DaySummary, AddFoodResult
+    models.py                # модели: Macros, Food, Meal, DayInfo, User, DaySummary, …
     parsing.py               # разбор цели и форматов ввода, пересчёт КБЖУ
-    services.py              # UserService, DayService, FoodService
+    services/                # доменные сервисы: один сервис — один файл
+      user.py                # UserService — пользователь и цель КБЖУ
+      day.py                 # DayService — заметки, история, сводка
+      food.py                # FoodService — добавление блюд
+      common.py              # общие помощники сервисов
+      interfaces/
+        database.py          # DatabaseInterface — порт хранилища
   infrastructure/            # адаптеры к внешним зависимостям
-    db.py                    # SQLite (aiosqlite)
-    deepseek.py              # DeepSeek API
+    adapters/
+      databases/sqlite.py    # SQLite (aiosqlite) — реализация DatabaseInterface
+      deepseek.py            # DeepSeek API
   presentation/              # работа с Telegram
     handlers.py              # Router и обработчики сообщений/callback'ов
     keyboards.py             # клавиатуры
     formatting.py            # форматирование вывода
     middleware.py            # инъекция сервисов из контейнера
+alembic/                     # миграции схемы БД
+  env.py                     # конфигурация: DB_PATH → sqlite:/// (драйвер для CLI)
+  versions/                  # файлы миграций
+alembic.ini                  # настройки Alembic
+docker-compose.yml           # сервисы: migrate (миграции) и caloriebot (бот)
 ```
