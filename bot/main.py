@@ -22,13 +22,11 @@ async def main() -> None:
     dp.update.outer_middleware(ContainerMiddleware(container))
     dp.include_router(router)
 
-    # Соединение с БД открывается на входе в блок и закрывается на выходе.
-    async with container.sqlite_adapter():
-        try:
-            await bot.delete_webhook(drop_pending_updates=True)
-            await dp.start_polling(bot)
-        finally:
-            await bot.session.close()
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+        await dp.start_polling(bot)
+    finally:
+        await bot.session.close()
 
 
 if __name__ == "__main__":
