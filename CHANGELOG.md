@@ -18,6 +18,7 @@
 - **Порт хранилища `DatabaseInterface`** — абстракция в `domain/services/interfaces/database.py`: сервисы зависят от неё, а не от `SqliteAdapter`, поэтому реализацию можно подменить (например, для тестов).
 - **Доменная модель `User`** — пользователь с именем, целью КБЖУ и выбранной заметкой.
 - **Миграции Alembic** — схема БД (`users`, `days`, `meals`) версионируется в `alembic/versions`, состояние хранится в таблице `alembic_version`; накат — `alembic upgrade head` (локально вручную, в Docker — сервис `migrate`, бот стартует только после его успешного завершения).
+- **SQLAlchemy-модели таблиц** — `bot/infrastructure/models/` (`base.py`, `user.py`, `day.py`, `meal.py`); их `Base.metadata` подключается в `alembic/env.py` как `target_metadata`, поэтому будущие миграции можно генерировать через autogenerate.
 
 ### Changed
 
@@ -34,7 +35,10 @@
 - `domain/services.py` разбит на пакет `domain/services/`: `user.py`, `day.py`, `food.py` (один сервис — один файл) плюс `common.py` и `interfaces/database.py`; публичные импорты (`from bot.domain.services import …`) не изменились.
 - `DayService.get_current_day()` и `FoodService._store()` больше не делают лишний запрос за заметкой: `get_target_day()` сразу возвращает день.
 - Схема БД больше не создаётся приложением: из `SqliteAdapter` убраны константа `SCHEMA` и метод `_migrate()` — таблицы создаёт и меняет только Alembic (`alembic upgrade head`).
-- `SqliteAdapter` больше не держит соединение: каждый его метод открывает соединение сам (`async with`) и закрывает на выходе, поэтому лишний жизненный цикл снаружи не нужен, а `main.py` про БД вообще не знает.
+- Baseline-миграция переписана на SQLAlchemy (`op.create_table` вместо SQL-строк в `op.execute`); на БД, созданной до Alembic, она по-прежнему не падает — просто добавляет недостающую колонку `users.active_day_id`.
+- `SqliteAdapter` больше не держит соединение: каждый его метод открывает сессию сам (`async with`) и закрывает на выходе, поэтому лишний жизненный цикл снаружи не нужен, а `main.py` про БД вообще не знает.
+- `SqliteAdapter` переведён на SQLAlchemy: сырые SQL-строки заменены на запросы из моделей таблиц (`select`/`insert`/`update`/`delete`, `insert(…).on_conflict_do_update()` для upsert, `insert(…).returning(id)` для `create_day`), движок `create_async_engine` с `NullPool` и `async_sessionmaker(expire_on_commit=False)` создаётся в `__init__`.
+- `SqliteAdapter._*_from_row()` получают типизированные ORM-сущности вместо `Row` — без ручных приведений `int()/float()/str()`.
 
 ### Removed
 

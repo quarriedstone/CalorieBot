@@ -36,6 +36,7 @@ Telegram-бот для учёта КБЖУ. Бот распознаёт блюд
 - [dependency-injector](https://python-dependency-injector.ets-labs.org/) — DI-контейнер
 - [OpenAI SDK](https://platform.deepseek.com/) — клиент к DeepSeek API (Responses API, модель `deepseek-flash`)
 - SQLite (aiosqlite) — хранение данных
+- [SQLAlchemy 2](https://www.sqlalchemy.org/) — модели таблиц и запросы адаптера
 - [Alembic](https://alembic.sqlalchemy.org/) — миграции схемы БД
 - Docker
 
@@ -105,8 +106,13 @@ bot/
       interfaces/
         database.py          # DatabaseInterface — порт хранилища
   infrastructure/            # адаптеры к внешним зависимостям
+    models/                  # SQLAlchemy-модели таблиц (metadata для Alembic и запросы)
+      base.py                # Base
+      user.py                # users
+      day.py                 # days
+      meal.py                # meals
     adapters/
-      databases/sqlite.py    # SQLite (aiosqlite) — реализация DatabaseInterface
+      databases/sqlite.py    # SQLAlchemy поверх aiosqlite — реализация DatabaseInterface
       deepseek.py            # DeepSeek API
   presentation/              # работа с Telegram
     handlers.py              # Router и обработчики сообщений/callback'ов
@@ -114,7 +120,7 @@ bot/
     formatting.py            # форматирование вывода
     middleware.py            # инъекция сервисов из контейнера
 alembic/                     # миграции схемы БД
-  env.py                     # конфигурация: DB_PATH → sqlite:/// (драйвер для CLI)
+  env.py                     # DB_PATH → sqlite:///, target_metadata из models
   versions/                  # файлы миграций
 alembic.ini                  # настройки Alembic
 docker-compose.yml           # сервисы: migrate (миграции) и caloriebot (бот)

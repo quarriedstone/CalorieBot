@@ -1,87 +1,115 @@
+"""Адаптер SQLite: SQLAlchemy поверх aiosqlite."""
+
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
-import aiosqlite
+from sqlalchemy import delete, func, insert, select, update
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.ext.asyncio import (
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
+from sqlalchemy.pool import NullPool
 
 from bot.domain.models import DayInfo, Food, Macros, Meal, User
 from bot.domain.services.interfaces import DatabaseInterface
+from bot.infrastructure import models as tables
 
 
 class SqliteAdapter(DatabaseInterface):
-    """Адаптер поверх SQLite (aiosqlite), реализует :class:`DatabaseInterface`.
+    """Адаптер поверх SQLite (SQLAlchemy + aiosqlite).
 
-    Долгоживущего соединения нет: каждый метод открывает соединение сам
-    (``async with``) и закрывает его на выходе из метода.
-
-    Схемой владеет Alembic (``alembic upgrade head``): адаптер не создаёт таблицы
-    и не меняет их структуру, только читает и пишет данные.
+    Долгоживущего соединения нет: ``NullPool`` плюс сессия на один запрос —
+    соединение открывается на время метода и закрывается на выходе. Запросы
+    собираются из моделей таблиц (:mod:`bot.infrastructure.models`), SQL руками
+    не пишется. Схемой владеет Alembic (``alembic upgrade head``): адаптер
+    не создаёт таблицы и не меняет их структуру, только читает и пишет данные.
     """
 
     def __init__(self, path: str) -> None:
-        self._path = path
+        engine = create_async_engine(
+            f"sqlite+aiosqlite:///{Path(path).as_posix()}", poolclass=NullPool
+        )
+        self._sessions = async_sessionmaker(engine, expire_on_commit=False)
 
     # ---------- users ----------
     async def upsert_user(self, user_id: int, username: str | None) -> None:
-        async with self._connect() as conn:
-            await conn.execute(
-                "INSERT INTO users (user_id, username) VALUES (?, ?) "
-                "ON CONFLICT(user_id) DO UPDATE SET username = excluded.username",
-                (user_id, username),
+        stmt = sqlite_insert(tables.User).values(user_id=user_id, username=username)
+        async with self._session() as session:
+            await session.execute(
+                stmt.on_conflict_do_update(
+                    index_elements=[tables.User.user_id],
+                    set_={"username": stmt.excluded.username},
+                )
             )
-            await conn.commit()
+            await session.commit()
 
     async def get_user(self, user_id: int) -> User | None:
-        async with self._connect() as conn, conn.execute(
-            "SELECT * FROM users WHERE user_id = ?", (user_id,)
-        ) as cur:
-            row = await cur.fetchone()
+        async with self._session() as session:
+            row = (
+                await session.scalars(
+                    select(tables.User).where(tables.User.user_id == user_id)
+                )
+            ).one_or_none()
         return None if row is None else self._user_from_row(row)
 
     async def set_goal(self, user_id: int, goal: Macros) -> None:
-        async with self._connect() as conn:
-            await conn.execute(
-                "UPDATE users SET goal_calories = ?, goal_protein = ?, "
-                "goal_fat = ?, goal_carbs = ? WHERE user_id = ?",
-                (goal.calories, goal.protein, goal.fat, goal.carbs, user_id),
+        async with self._session() as session:
+            await session.execute(
+                update(tables.User)
+                .where(tables.User.user_id == user_id)
+                .values(
+                    goal_calories=goal.calories,
+                    goal_protein=goal.protein,
+                    goal_fat=goal.fat,
+                    goal_carbs=goal.carbs,
+                )
             )
-            await conn.commit()
+            await session.commit()
 
     async def set_active_day(self, user_id: int, day_id: int | None) -> None:
         """Запомнить день для добавления продуктов (None — последний день)."""
-        async with self._connect() as conn:
-            await conn.execute(
-                "UPDATE users SET active_day_id = ? WHERE user_id = ?",
-                (day_id, user_id),
+        async with self._session() as session:
+            await session.execute(
+                update(tables.User)
+                .where(tables.User.user_id == user_id)
+                .values(active_day_id=day_id)
             )
-            await conn.commit()
+            await session.commit()
 
     async def clear_active_day(self, user_id: int) -> None:
         await self.set_active_day(user_id, None)
 
     # ---------- days ----------
     async def create_day(self, user_id: int, day: str) -> DayInfo:
-        async with self._connect() as conn:
-            count = await self._count_days_on(conn, user_id, day)
-            label = day if count == 0 else f"{day} ({count + 1})"
-            cur = await conn.execute(
-                "INSERT INTO days (user_id, day, label) VALUES (?, ?, ?)",
-                (user_id, day, label),
+        async with self._session() as session:
+            count = await session.scalar(
+                select(func.count())
+                .select_from(tables.Day)
+                .where(tables.Day.user_id == user_id, tables.Day.day == day)
             )
-            await conn.commit()
-            assert cur.lastrowid is not None, "SQLite не вернул id созданного дня"
-            return DayInfo(
-                id=int(cur.lastrowid), user_id=user_id, date=day, label=label
+            label = day if not count else f"{day} ({count + 1})"
+            day_id = await session.scalar(
+                insert(tables.Day)
+                .values(user_id=user_id, day=day, label=label)
+                .returning(tables.Day.id)
             )
+            await session.commit()
+        assert day_id is not None, "SQLite не вернул id созданного дня"
+        return DayInfo(id=day_id, user_id=user_id, date=day, label=label)
 
     async def get_latest_day_id(self, user_id: int) -> int | None:
-        async with self._connect() as conn, conn.execute(
-            "SELECT id FROM days WHERE user_id = ? ORDER BY id DESC LIMIT 1",
-            (user_id,),
-        ) as cur:
-            row = await cur.fetchone()
-        return int(row["id"]) if row is not None else None
+        async with self._session() as session:
+            return await session.scalar(
+                select(tables.Day.id)
+                .where(tables.Day.user_id == user_id)
+                .order_by(tables.Day.id.desc())
+                .limit(1)
+            )
 
     async def get_target_day(self, user_id: int, day: str) -> DayInfo:
         """День для добавления продуктов: выбранный в истории или последний."""
@@ -93,94 +121,105 @@ class SqliteAdapter(DatabaseInterface):
         return await self._get_current_day(user_id, day)
 
     async def get_day(self, day_id: int) -> DayInfo | None:
-        async with self._connect() as conn, conn.execute(
-            "SELECT * FROM days WHERE id = ?", (day_id,)
-        ) as cur:
-            row = await cur.fetchone()
+        async with self._session() as session:
+            row = (
+                await session.scalars(select(tables.Day).where(tables.Day.id == day_id))
+            ).one_or_none()
         return None if row is None else self._day_from_row(row)
 
     async def get_last_days(self, user_id: int, limit: int = 5) -> list[DayInfo]:
-        async with self._connect() as conn, conn.execute(
-            "SELECT * FROM days WHERE user_id = ? ORDER BY id DESC LIMIT ?",
-            (user_id, limit),
-        ) as cur:
-            return [self._day_from_row(row) for row in await cur.fetchall()]
+        async with self._session() as session:
+            rows = (
+                await session.scalars(
+                    select(tables.Day)
+                    .where(tables.Day.user_id == user_id)
+                    .order_by(tables.Day.id.desc())
+                    .limit(limit)
+                )
+            ).all()
+        return [self._day_from_row(row) for row in rows]
 
     async def delete_day(self, day_id: int) -> None:
         """Удалить день вместе с его записями.
 
         Каскад в SQLite по умолчанию выключен, поэтому записи чистим вручную.
         """
-        async with self._connect() as conn:
-            await conn.execute("DELETE FROM meals WHERE day_id = ?", (day_id,))
-            await conn.execute("DELETE FROM days WHERE id = ?", (day_id,))
-            await conn.commit()
+        async with self._session() as session:
+            await session.execute(
+                delete(tables.Meal).where(tables.Meal.day_id == day_id)
+            )
+            await session.execute(delete(tables.Day).where(tables.Day.id == day_id))
+            await session.commit()
 
     # ---------- meals ----------
     async def add_meal(self, day_id: int, food: Food) -> None:
-        async with self._connect() as conn:
-            await conn.execute(
-                "INSERT INTO meals (day_id, name, calories, protein, fat, carbs) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (day_id, food.name, food.calories, food.protein, food.fat, food.carbs),
+        async with self._session() as session:
+            await session.execute(
+                insert(tables.Meal).values(
+                    day_id=day_id,
+                    name=food.name,
+                    calories=food.calories,
+                    protein=food.protein,
+                    fat=food.fat,
+                    carbs=food.carbs,
+                )
             )
-            await conn.commit()
+            await session.commit()
 
     async def get_meals(self, day_id: int) -> list[Meal]:
-        async with self._connect() as conn, conn.execute(
-            "SELECT * FROM meals WHERE day_id = ? ORDER BY id", (day_id,)
-        ) as cur:
-            return [self._meal_from_row(row) for row in await cur.fetchall()]
+        async with self._session() as session:
+            rows = (
+                await session.scalars(
+                    select(tables.Meal)
+                    .where(tables.Meal.day_id == day_id)
+                    .order_by(tables.Meal.id)
+                )
+            ).all()
+        return [self._meal_from_row(row) for row in rows]
 
     async def get_meal(self, meal_id: int) -> Meal | None:
-        async with self._connect() as conn, conn.execute(
-            "SELECT * FROM meals WHERE id = ?", (meal_id,)
-        ) as cur:
-            row = await cur.fetchone()
+        async with self._session() as session:
+            row = (
+                await session.scalars(
+                    select(tables.Meal).where(tables.Meal.id == meal_id)
+                )
+            ).one_or_none()
         return None if row is None else self._meal_from_row(row)
 
     async def delete_meal(self, meal_id: int) -> None:
-        async with self._connect() as conn:
-            await conn.execute("DELETE FROM meals WHERE id = ?", (meal_id,))
-            await conn.commit()
+        async with self._session() as session:
+            await session.execute(delete(tables.Meal).where(tables.Meal.id == meal_id))
+            await session.commit()
 
     async def get_day_totals(self, day_id: int) -> Macros:
-        async with self._connect() as conn, conn.execute(
-            "SELECT COALESCE(SUM(calories), 0) AS calories, "
-            "COALESCE(SUM(protein), 0) AS protein, "
-            "COALESCE(SUM(fat), 0) AS fat, "
-            "COALESCE(SUM(carbs), 0) AS carbs "
-            "FROM meals WHERE day_id = ?",
-            (day_id,),
-        ) as cur:
-            row = await cur.fetchone()
-        assert row is not None, "SUM() не вернул строку"
+        async with self._session() as session:
+            row = (
+                await session.execute(
+                    select(
+                        func.coalesce(func.sum(tables.Meal.calories), 0).label(
+                            "calories"
+                        ),
+                        func.coalesce(func.sum(tables.Meal.protein), 0).label(
+                            "protein"
+                        ),
+                        func.coalesce(func.sum(tables.Meal.fat), 0).label("fat"),
+                        func.coalesce(func.sum(tables.Meal.carbs), 0).label("carbs"),
+                    ).where(tables.Meal.day_id == day_id)
+                )
+            ).one()
         return Macros(
-            calories=float(row["calories"]),
-            protein=float(row["protein"]),
-            fat=float(row["fat"]),
-            carbs=float(row["carbs"]),
+            calories=float(row.calories),
+            protein=float(row.protein),
+            fat=float(row.fat),
+            carbs=float(row.carbs),
         )
 
     # ---------- внутренние методы ----------
     @asynccontextmanager
-    async def _connect(self) -> AsyncGenerator[aiosqlite.Connection]:
-        """Соединение на время одного запроса."""
-        async with aiosqlite.connect(self._path) as conn:
-            conn.row_factory = aiosqlite.Row
-            yield conn
-
-    async def _count_days_on(
-        self, conn: aiosqlite.Connection, user_id: int, day: str
-    ) -> int:
-        """Сколько дней пользователя уже заведено на эту дату."""
-        async with conn.execute(
-            "SELECT COUNT(*) AS c FROM days WHERE user_id = ? AND day = ?",
-            (user_id, day),
-        ) as cur:
-            row = await cur.fetchone()
-        assert row is not None, "COUNT(*) не вернул строку"
-        return int(row["c"])
+    async def _session(self) -> AsyncGenerator[AsyncSession]:
+        """Сессия на время одного запроса: соединение закроет ``NullPool``."""
+        async with self._sessions() as session:
+            yield session
 
     async def _get_current_day(self, user_id: int, day: str) -> DayInfo:
         """Последний день пользователя или новый, если дней ещё нет."""
@@ -192,43 +231,41 @@ class SqliteAdapter(DatabaseInterface):
         return current
 
     @staticmethod
-    def _user_from_row(row: aiosqlite.Row) -> User:
+    def _user_from_row(row: tables.User) -> User:
         goal = (
             None
-            if row["goal_calories"] is None
+            if row.goal_calories is None
             else Macros(
-                calories=float(row["goal_calories"]),
-                protein=float(row["goal_protein"] or 0),
-                fat=float(row["goal_fat"] or 0),
-                carbs=float(row["goal_carbs"] or 0),
+                calories=row.goal_calories,
+                protein=row.goal_protein or 0,
+                fat=row.goal_fat or 0,
+                carbs=row.goal_carbs or 0,
             )
         )
         return User(
-            id=int(row["user_id"]),
-            username=row["username"],
+            id=row.user_id,
+            username=row.username,
             goal=goal,
-            active_day_id=(
-                None if row["active_day_id"] is None else int(row["active_day_id"])
-            ),
+            active_day_id=row.active_day_id,
         )
 
     @staticmethod
-    def _day_from_row(row: aiosqlite.Row) -> DayInfo:
+    def _day_from_row(row: tables.Day) -> DayInfo:
         return DayInfo(
-            id=int(row["id"]),
-            user_id=int(row["user_id"]),
-            date=str(row["day"]),
-            label=str(row["label"]),
+            id=row.id,
+            user_id=row.user_id,
+            date=row.day,
+            label=row.label,
         )
 
     @staticmethod
-    def _meal_from_row(row: aiosqlite.Row) -> Meal:
+    def _meal_from_row(row: tables.Meal) -> Meal:
         return Meal(
-            id=int(row["id"]),
-            day_id=int(row["day_id"]),
-            name=str(row["name"]),
-            calories=float(row["calories"]),
-            protein=float(row["protein"]),
-            fat=float(row["fat"]),
-            carbs=float(row["carbs"]),
+            id=row.id,
+            day_id=row.day_id,
+            name=row.name,
+            calories=row.calories,
+            protein=row.protein,
+            fat=row.fat,
+            carbs=row.carbs,
         )

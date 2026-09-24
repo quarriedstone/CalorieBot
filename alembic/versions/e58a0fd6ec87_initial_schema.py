@@ -1,7 +1,8 @@
 """initial schema: users, days, meals
 
-Миграция идемпотентна: на уже развёрнутой БД (до Alembic) она только
-создаёт недостающие таблицы и добивает колонку users.active_day_id.
+Схема описана через SQLAlchemy (`op.create_table`). Миграция терпима к БД,
+созданной до Alembic (старым кодом приложения): существующие таблицы она
+не трогает, а колонку `users.active_day_id` добавляет, если её нет.
 
 Revision ID: e58a0fd6ec87
 Revises:
@@ -21,60 +22,98 @@ down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
-USERS_TABLE = """
-CREATE TABLE IF NOT EXISTS users (
-    user_id INTEGER PRIMARY KEY,
-    username TEXT,
-    goal_calories REAL,
-    goal_protein REAL,
-    goal_fat REAL,
-    goal_carbs REAL,
-    active_day_id INTEGER,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-)
-"""
+CREATED_AT_DEFAULT = sa.text("(datetime('now'))")
+ZERO_DEFAULT = sa.text("0")
 
-DAYS_TABLE = """
-CREATE TABLE IF NOT EXISTS days (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    day TEXT NOT NULL,
-    label TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-)
-"""
 
-MEALS_TABLE = """
-CREATE TABLE IF NOT EXISTS meals (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    day_id INTEGER NOT NULL REFERENCES days(id) ON DELETE CASCADE,
-    name TEXT NOT NULL,
-    calories REAL NOT NULL DEFAULT 0,
-    protein REAL NOT NULL DEFAULT 0,
-    fat REAL NOT NULL DEFAULT 0,
-    carbs REAL NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-)
-"""
+def _existing_tables() -> set[str]:
+    """Имена таблиц, которые уже есть в БД."""
+    return set(sa.inspect(op.get_bind()).get_table_names())
 
 
 def _column_names(table: str) -> set[str]:
-    """Имена колонок таблицы через PRAGMA (пустое множество, если таблицы нет)."""
-    rows = op.get_bind().execute(sa.text(f"PRAGMA table_info({table})")).fetchall()
-    return {str(row[1]) for row in rows}
+    """Имена колонок таблицы (пустое множество, если таблицы нет)."""
+    inspector = sa.inspect(op.get_bind())
+    if table not in set(inspector.get_table_names()):
+        return set()
+    return {column["name"] for column in inspector.get_columns(table)}
 
 
 def upgrade() -> None:
-    """Создать схему; на старой БД добить колонку active_day_id."""
-    op.execute(USERS_TABLE)
-    op.execute(DAYS_TABLE)
-    op.execute(MEALS_TABLE)
-    if "active_day_id" not in _column_names("users"):
-        op.execute("ALTER TABLE users ADD COLUMN active_day_id INTEGER")
+    """Создать схему; на БД от старого кода — только добавить active_day_id."""
+    tables = _existing_tables()
+
+    if "users" not in tables:
+        op.create_table(
+            "users",
+            sa.Column("user_id", sa.Integer(), primary_key=True),
+            sa.Column("username", sa.Text(), nullable=True),
+            sa.Column("goal_calories", sa.REAL(), nullable=True),
+            sa.Column("goal_protein", sa.REAL(), nullable=True),
+            sa.Column("goal_fat", sa.REAL(), nullable=True),
+            sa.Column("goal_carbs", sa.REAL(), nullable=True),
+            sa.Column("active_day_id", sa.Integer(), nullable=True),
+            sa.Column(
+                "created_at",
+                sa.Text(),
+                nullable=False,
+                server_default=CREATED_AT_DEFAULT,
+            ),
+        )
+    elif "active_day_id" not in _column_names("users"):
+        op.add_column(
+            "users", sa.Column("active_day_id", sa.Integer(), nullable=True)
+        )
+
+    if "days" not in tables:
+        op.create_table(
+            "days",
+            sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
+            sa.Column("user_id", sa.Integer(), nullable=False),
+            sa.Column("day", sa.Text(), nullable=False),
+            sa.Column("label", sa.Text(), nullable=False),
+            sa.Column(
+                "created_at",
+                sa.Text(),
+                nullable=False,
+                server_default=CREATED_AT_DEFAULT,
+            ),
+            sqlite_autoincrement=True,
+        )
+
+    if "meals" not in tables:
+        op.create_table(
+            "meals",
+            sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
+            sa.Column(
+                "day_id",
+                sa.Integer(),
+                sa.ForeignKey("days.id", ondelete="CASCADE"),
+                nullable=False,
+            ),
+            sa.Column("name", sa.Text(), nullable=False),
+            sa.Column(
+                "calories", sa.REAL(), nullable=False, server_default=ZERO_DEFAULT
+            ),
+            sa.Column(
+                "protein", sa.REAL(), nullable=False, server_default=ZERO_DEFAULT
+            ),
+            sa.Column("fat", sa.REAL(), nullable=False, server_default=ZERO_DEFAULT),
+            sa.Column(
+                "carbs", sa.REAL(), nullable=False, server_default=ZERO_DEFAULT
+            ),
+            sa.Column(
+                "created_at",
+                sa.Text(),
+                nullable=False,
+                server_default=CREATED_AT_DEFAULT,
+            ),
+            sqlite_autoincrement=True,
+        )
 
 
 def downgrade() -> None:
     """Удалить схему (порядок обратный из-за ссылок)."""
-    op.execute("DROP TABLE IF EXISTS meals")
-    op.execute("DROP TABLE IF EXISTS days")
-    op.execute("DROP TABLE IF EXISTS users")
+    op.drop_table("meals")
+    op.drop_table("days")
+    op.drop_table("users")

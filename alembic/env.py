@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from sqlalchemy import engine_from_config, pool
 
 from alembic import context
+from bot.infrastructure.models import Base
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -27,9 +28,9 @@ config.set_main_option(
     f"sqlite:///{Path(os.getenv('DB_PATH', 'data/bot.db')).as_posix()}",
 )
 
-# autogenerate не используем: моделей SQLAlchemy в проекте нет,
-# миграции пишутся SQL-ом вручную.
-target_metadata = None
+# Схема описана моделями таблиц (bot/infrastructure/models) — их metadata
+# и есть источник правды для autogenerate.
+target_metadata = Base.metadata
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
