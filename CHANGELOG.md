@@ -15,9 +15,19 @@
 - **Удаление дня** — кнопка «🗑 Удалить день» на карточке дня: бот спрашивает подтверждение («✅ Удалить» / «❌ Отмена») и удаляет день вместе с записями; активный день при этом сбрасывается, а после удаления бот сообщает об этом и предлагает выбрать день заново из истории.
 - **Блокировка до выбора дня** — пока день не выбран заново, бот не добавляет продукты и не открывает удаление продукта: в ответ приходит список дней из истории.
 - **Блокировка без заметки** — если заметок нет совсем, продукты не добавляются: бот отвечает «❗️ Сначала создайте новую заметку!» и ждёт кнопку «📝 Новая заметка». Заметка больше не создаётся неявно первым сообщением с едой.
+- **Порт хранилища `DatabaseInterface`** — абстракция в `domain/services/interfaces/database.py`: сервисы зависят от неё, а не от `DatabaseAdapter`, поэтому реализацию можно подменить (например, для тестов).
+- **Доменная модель `User`** — пользователь с именем, целью КБЖУ и выбранной заметкой.
+- **Миграции Alembic** — схема БД (`users`, `days`, `meals`) версионируется в `alembic/versions`, состояние хранится в таблице `alembic_version`; накат — `alembic upgrade head` (локально вручную, в Docker — сервис `migrate`, бот стартует только после его успешного завершения).
+- **SQLAlchemy-модели таблиц** — `bot/infrastructure/models/` (`base.py`, `user.py`, `day.py`, `meal.py`); их `Base.metadata` подключается в `alembic/env.py` как `target_metadata`, поэтому будущие миграции можно генерировать через autogenerate.
+- **`SqliteSettings`** — настройки хранилища в `bot/settings/databases/sqlite.py` (pydantic-settings): путь из `DB_PATH` и собранные из него URL — `url` для async-движка (`sqlite+aiosqlite:///…`) и `sync_url` для Alembic (`sqlite:///…`).
+- **`DeepSeekSettings`** — настройки API в `bot/settings/deepseek.py` (pydantic-settings): ключ, `base_url` и модель из переменных `DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL` / `DEEPSEEK_MODEL`. Все настройки собраны в пакете `bot/settings/` (общие — `AppSettings` в `config.py`), в `AppContainer` есть провайдеры `app_settings`, `sqlite_settings` и `deepseek_settings`.
 
 ### Changed
 
+- Сущность «день» переименована в «заметку» и в коде: `DayService` → `NoteService`, `DayInfo` → `NoteInfo`, `DaySummary` → `NoteSummary`, `day_id` → `note_id`, `User.active_day_id` → `active_note_id`; методы порта и адаптера (`add_day`/`get_day`/`get_last_days`/`count_days`/`delete_day`/`set_active_day`/`get_day_totals` → `add_note`/`get_note`/`get_last_notes`/`count_notes`/`delete_note`/`set_active_note`/`get_note_totals`) и сервиса (`start_new_day`/`get_current_day`/`select_day`/`get_selected_day`/`delete_day`/`is_latest_day` → `start_new_note`/`get_current_note`/`select_note`/`get_selected_note`/`delete_note`/`is_latest_note`); ключ DI `day_service` → `note_service`, callback'и `day:` / `delday:` / `deldayok:` / `deldayno:` → `note:` / `delnote:` / `delnoteok:` / `delnoteno:`; таблица `days` → `notes`, колонка `day` → `date`, `meals.day_id` → `note_id`.
+- Миграция `b7d2c4e91a30` переименовывает схему на месте (`ALTER TABLE … RENAME TO/COLUMN`, SQLite 3.25+), поэтому данные, автоинкремент и внешний ключ `meals.note_id` сохраняются без пересоздания таблиц.
+- Порт хранилища стал тонким: дневные операции — только примитивы (`add_day`, `get_day`, `count_days`, `get_last_days`, `delete_day`), а выбор активной/текущей заметки, генерация её названия (`2026-09-27 (2)`) и проверка владельца переехали в `DayService`; `FoodService` получил зависимость `DayService` (`get_current_day()`, `is_latest_day()`) вместо удалённых методов порта.
+- Модуль `bot/domain/parsing.py` расформирован: разбор форматов еды и пересчёт КБЖУ переехали в `FoodService` (приватные методы), разбор цели — в публичный метод `UserService.parse_goal()`, а модели разбора `StructuredFood` и `PortionFood` — в `bot/domain/models.py`; общая формула калорий стала фабрикой `Macros.from_bju()`.
 - Название блюда при распознавании через DeepSeek берётся из ответа модели как есть (раньше переопределялось локально на «Название (вес г)»).
 - Перешли на DeepSeek **Responses API** (`client.responses.create`) со строгой JSON-схемой ответа (`text.format` = `json_schema`); модель по умолчанию — `deepseek-flash` (было `deepseek-chat` через Chat Completions).
 - В ответе модели появились `found`, `confidence` и `reason`: непищевые и неизвестные вводы больше не добавляются как блюдо.
@@ -26,11 +36,30 @@
 - В текстах бота и документации сущность «день» переименована в «заметку»: «Заметка, открытая из истории, становится активной», «Последние заметки», «В этой заметке пока нечего удалять» и т. д.
 - Справка `/start` переписана: цель КБЖУ — первый шаг, затем создание новой заметки и способы ввода еды; в пункты добавлены эмодзи, примеры уточнены («60 г круассана»).
 - Без заданной цели КБЖУ бот не добавляет продукты, а отвечает «❗️ Сначала создайте цель!» с подсказкой по формату цели (как в прежнем сообщении «Не понял.»); тот же текст приходит, если в шаге настройки цели введён не формат цели.
+- Адаптер хранилища больше не отдаёт строки SQLite: `get_user`, `get_day`, `get_last_days`, `get_meals`, `get_meal` и `get_day_totals` возвращают доменные модели (`User`, `DayInfo`, `Meal`, `Macros`), а `create_day` и `get_target_day` — `DayInfo`; перевод строк в модели живёт только внутри `DatabaseAdapter`.
+- Запись в хранилище принимает модели: `set_goal(user_id, goal: Macros)` и `add_meal(day_id, food: Food)` вместо пяти чисел.
+- `domain/services.py` разбит на пакет `domain/services/`: `user.py`, `day.py`, `food.py` (один сервис — один файл) плюс `common.py` и `interfaces/database.py`; публичные импорты (`from bot.domain.services import …`) не изменились.
+- `DayService.get_current_day()` и `FoodService._store()` больше не делают лишний запрос за заметкой: `get_target_day()` сразу возвращает день.
+- Схема БД больше не создаётся приложением: из `DatabaseAdapter` убраны константа `SCHEMA` и метод `_migrate()` — таблицы создаёт и меняет только Alembic (`alembic upgrade head`).
+- Baseline-миграция переписана на SQLAlchemy (`op.create_table` вместо SQL-строк в `op.execute`); на БД, созданной до Alembic, она по-прежнему не падает — просто добавляет недостающую колонку `users.active_day_id`.
+- `DatabaseAdapter` больше не держит соединение: каждый его метод открывает сессию сам (`async with`) и закрывает на выходе, поэтому лишний жизненный цикл снаружи не нужен, а `main.py` про БД вообще не знает.
+- `SqliteAdapter` переименован в `DatabaseAdapter`: адаптер работает через SQLAlchemy и не привязан к конкретной СУБД (sqlite-специфика осталась в настройках и движке: `SqliteSettings`, `sqlite_engine`).
+- Адаптер собран на SQLAlchemy: сырые SQL-строки заменены на запросы из моделей таблиц (`select`/`insert`/`update`/`delete`, `insert(…).on_conflict_do_update()` для upsert, `insert(…).returning(id)` для `create_day`), движок `create_async_engine` с `NullPool` и `async_sessionmaker(expire_on_commit=False)` приходит из контейнера.
+- Строки БД превращаются в доменные модели самим pydantic (`model_validate(row, from_attributes=True)`) — методы-конвертеры `_*_from_row()` удалены. Чтобы это работало, атрибуты ORM-моделей названы как поля доменных моделей (`users.id` ↔ колонка `user_id`, `days.date` ↔ колонка `day`, `users.goal` — свойство из четырёх колонок); схема БД при этом не меняется.
+- Настройки БД убраны из `bot/config.py` и переехали в `SqliteSettings`; в контейнере появились провайдеры `sqlite_settings` и `sqlite_engine`: URL и async-движок (`NullPool`) создаются в `AppContainer`, а в `DatabaseAdapter` передаётся готовый движок — адаптер не знает ни про путь к файлу БД, ни про драйвер.
+- Модуль `bot/config.py` переехал в `bot/settings/config.py` (класс `AppSettings` — только `BOT_TOKEN`), параметры DeepSeek вынесены в `DeepSeekSettings`: адаптер DeepSeek получает их из провайдера `deepseek_settings`, а `main.py` берёт токен бота из контейнера (`container.app_settings().bot_token`) вместо глобального `settings`. В классах настроек `model_config` объявляется после полей.
+- `alembic/env.py` берёт URL из `SqliteSettings`, а не собирает его вручную из `os.getenv("DB_PATH")`.
 
 ### Removed
 
+- Старые модули `bot/domain/services/day.py` (`DayService`) и `bot/infrastructure/models/day.py` (таблица `days`) — заменены на `bot/domain/services/note.py` (`NoteService`) и `bot/infrastructure/models/note.py` (таблица `notes`).
+- Методы `create_day`, `get_target_day`, `get_latest_day_id` и `clear_active_day` из `DatabaseInterface`/`DatabaseAdapter` — вместо них примитивы `add_day()` с явным `label` и `count_days()`, а логика выбора и названия заметок — в `DayService` (сброс выбора — `set_active_day(user_id, None)`).
+- Модуль `bot/domain/parsing.py` — его технические функции живут в сервисах, которые их используют (`FoodService`, `UserService`), а модели — в `bot/domain/models.py`; отдельный модуль парсинга больше не нужен.
 - Кнопка «↩️ Текущий день» на карточке дня и метод `DayService.back_to_today()` — заметка выбирается заново из списка, отдельный возврат к последней не нужен.
 - Метод `DayService.needs_day_choice()` — его поведение («заметок нет — не блокируем, первый день создастся сам») и было причиной неявного создания заметки; теперь бот проверяет активную заметку напрямую (`get_selected_day`).
+- Публичный `get_current_day()` у `DatabaseInterface` и `DatabaseAdapter` — используется только внутри `get_target_day()`, стал приватным `_get_current_day()`.
+- Публичный жизненный цикл у `DatabaseAdapter` (`init()`/`shutdown()`, затем контекстный менеджер с `__aenter__`/`__aexit__` и свойством `conn`) — соединением управляет сам адаптер, отдельно на каждый запрос.
+- Методы-конвертеры `_user_from_row()`, `_day_from_row()` и `_meal_from_row()` — их работу делает pydantic (`model_validate(row, from_attributes=True)`).
 
 ### Fixed
 

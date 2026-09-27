@@ -1,12 +1,29 @@
 services:
+  # Одноразовый сервис: накатывает миграции и завершается.
+  migrate:
+    build: .
+    image: caloriebot:latest
+    container_name: caloriebot-migrate
+    restart: "no"
+    env_file:
+      - .env
+    volumes:
+      - bot_data:/app/data
+    command: ["alembic", "upgrade", "head"]
+
+  # Бот стартует только после успешного завершения миграций.
   caloriebot:
     build: .
+    image: caloriebot:latest
     container_name: caloriebot
     restart: unless-stopped
     env_file:
       - .env
     volumes:
       - bot_data:/app/data
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
 
 volumes:
   bot_data:

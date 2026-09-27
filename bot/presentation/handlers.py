@@ -8,29 +8,28 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 
-from bot.domain.models import DaySummary
-from bot.domain.parsing import parse_goal
+from bot.domain.models import NoteSummary
 from bot.domain.services import (
-    DayService,
     FoodNotFoundError,
     FoodService,
+    NoteService,
     UserService,
 )
 from bot.presentation import keyboards as kb
 from bot.presentation.formatting import (
     GOAL_PROMPT,
     HELP_TEXT,
-    NO_DAY_PROMPT,
     NO_GOAL_PROMPT,
-    SELECT_DAY_PROMPT,
+    NO_NOTE_PROMPT,
+    SELECT_NOTE_PROMPT,
     added_text,
-    build_day_text,
-    confirm_day_delete_text,
-    day_deleted_text,
+    build_note_text,
+    confirm_note_delete_text,
     delete_prompt_text,
     deleted_text,
     macros_str,
     not_found_text,
+    note_deleted_text,
 )
 
 logger = logging.getLogger(__name__)
@@ -50,20 +49,20 @@ def _int_arg(data: str | None, index: int) -> int | None:
 
 
 async def _own_summary(
-    callback: CallbackQuery, day_service: DayService
-) -> DaySummary | None:
+    callback: CallbackQuery, note_service: NoteService
+) -> NoteSummary | None:
     """Сводка заметки из callback_data с проверкой владельца."""
-    day_id = _int_arg(callback.data, 1)
-    if day_id is None:
+    note_id = _int_arg(callback.data, 1)
+    if note_id is None:
         await callback.answer("Неверный запрос.")
         return None
-    summary = await day_service.get_summary_for_user(callback.from_user.id, day_id)
+    summary = await note_service.get_summary_for_user(callback.from_user.id, note_id)
     if summary is None:
         await callback.answer("Заметка не найдена.")
     return summary
 
 
-async def _need_day_choice(message: Message, day_service: DayService) -> bool:
+async def _need_note_choice(message: Message, note_service: NoteService) -> bool:
     """Блокирует действие, пока заметка не создана и не выбрана.
 
     Заметка никогда не создаётся неявно при вводе продукта: первую заметку
@@ -71,13 +70,13 @@ async def _need_day_choice(message: Message, day_service: DayService) -> bool:
     но активная не выбрана, предлагаем выбрать её из истории.
     """
     user_id = message.from_user.id
-    if await day_service.get_selected_day(user_id) is not None:
+    if await note_service.get_selected_note(user_id) is not None:
         return False
-    days = await day_service.get_history(user_id, 5)
-    if not days:
-        await message.answer(NO_DAY_PROMPT, reply_markup=kb.main_menu())
+    notes = await note_service.get_history(user_id, 5)
+    if not notes:
+        await message.answer(NO_NOTE_PROMPT, reply_markup=kb.main_menu())
         return True
-    await message.answer(SELECT_DAY_PROMPT, reply_markup=kb.history_menu(days))
+    await message.answer(SELECT_NOTE_PROMPT, reply_markup=kb.history_menu(notes))
     return True
 
 
@@ -98,13 +97,13 @@ async def _has_goal(
     return False
 
 
-async def _show_day(message: Message, day_service: DayService, day_id: int) -> None:
-    summary = await day_service.get_summary(day_id)
+async def _show_note(message: Message, note_service: NoteService, note_id: int) -> None:
+    summary = await note_service.get_summary(note_id)
     if summary is None:
         return
     await message.answer(
-        build_day_text(summary),
-        reply_markup=kb.day_actions(summary.day.id),
+        build_note_text(summary),
+        reply_markup=kb.note_actions(summary.note.id),
     )
 
 
@@ -139,7 +138,7 @@ async def goal_input(
     state: FSMContext,
     user_service: UserService,
 ) -> None:
-    goal = parse_goal(message.text or "")
+    goal = user_service.parse_goal(message.text or "")
     if goal is None:
         await message.answer(NO_GOAL_PROMPT)
         return
@@ -174,52 +173,54 @@ async def show_plan(message: Message, user_service: UserService) -> None:
 
 
 # ---------- Новая заметка ----------
-@router.message(F.text == kb.MENU_NEW_DAY, StateFilter(None))
-async def new_day(message: Message, day_service: DayService) -> None:
-    day = await day_service.start_new_day(message.from_user.id)
-    await _show_day(message, day_service, day.id)
+@router.message(F.text == kb.MENU_NEW_NOTE, StateFilter(None))
+async def new_note(message: Message, note_service: NoteService) -> None:
+    note = await note_service.start_new_note(message.from_user.id)
+    await _show_note(message, note_service, note.id)
 
 
 # ---------- Удаление заметки ----------
-@router.callback_query(F.data.startswith("delday:"))
-async def delete_day_ask(callback: CallbackQuery, day_service: DayService) -> None:
-    summary = await _own_summary(callback, day_service)
+@router.callback_query(F.data.startswith("delnote:"))
+async def delete_note_ask(callback: CallbackQuery, note_service: NoteService) -> None:
+    summary = await _own_summary(callback, note_service)
     if summary is None:
         return
     await callback.answer()
     await callback.message.edit_text(
-        confirm_day_delete_text(summary),
-        reply_markup=kb.day_delete_confirm(summary.day.id),
+        confirm_note_delete_text(summary),
+        reply_markup=kb.note_delete_confirm(summary.note.id),
     )
 
 
-@router.callback_query(F.data.startswith("deldayno:"))
-async def delete_day_cancel(callback: CallbackQuery, day_service: DayService) -> None:
-    summary = await _own_summary(callback, day_service)
+@router.callback_query(F.data.startswith("delnoteno:"))
+async def delete_note_cancel(
+    callback: CallbackQuery, note_service: NoteService
+) -> None:
+    summary = await _own_summary(callback, note_service)
     if summary is None:
         return
     await callback.answer("Удаление отменено")
     await callback.message.edit_text(
-        build_day_text(summary),
-        reply_markup=kb.day_actions(summary.day.id),
+        build_note_text(summary),
+        reply_markup=kb.note_actions(summary.note.id),
     )
 
 
-@router.callback_query(F.data.startswith("deldayok:"))
-async def delete_day_cb(callback: CallbackQuery, day_service: DayService) -> None:
+@router.callback_query(F.data.startswith("delnoteok:"))
+async def delete_note_cb(callback: CallbackQuery, note_service: NoteService) -> None:
     user_id = callback.from_user.id
-    day_id = _int_arg(callback.data, 1)
-    if day_id is None:
+    note_id = _int_arg(callback.data, 1)
+    if note_id is None:
         await callback.answer("Неверный запрос.")
         return
-    day = await day_service.delete_day(user_id, day_id)
-    if day is None:
+    note = await note_service.delete_note(user_id, note_id)
+    if note is None:
         await callback.answer("Заметка не найдена.")
         return
     await callback.answer("Заметка удалена")
-    text = day_deleted_text(day.label)
-    days = await day_service.get_history(user_id, 5)
-    if not days:
+    text = note_deleted_text(note.label)
+    notes = await note_service.get_history(user_id, 5)
+    if not notes:
         await callback.message.edit_text(
             f"{text}\n\nНовая заметка создастся по кнопке «📝 Новая заметка».",
             reply_markup=None,
@@ -227,32 +228,32 @@ async def delete_day_cb(callback: CallbackQuery, day_service: DayService) -> Non
         return
     await callback.message.edit_text(
         f"{text}\n\nВыберите заметку заново — из истории:",
-        reply_markup=kb.history_menu(days),
+        reply_markup=kb.history_menu(notes),
     )
 
 
 # ---------- Выбор заметки ----------
 @router.message(F.text == kb.MENU_HISTORY, StateFilter(None))
-async def history(message: Message, day_service: DayService) -> None:
-    days = await day_service.get_history(message.from_user.id, 5)
-    if not days:
+async def history(message: Message, note_service: NoteService) -> None:
+    notes = await note_service.get_history(message.from_user.id, 5)
+    if not notes:
         await message.answer("Заметок пока нет.", reply_markup=kb.main_menu())
         return
-    await message.answer("Последние заметки:", reply_markup=kb.history_menu(days))
+    await message.answer("Последние заметки:", reply_markup=kb.history_menu(notes))
 
 
-@router.callback_query(F.data.startswith("day:"))
-async def show_day_cb(callback: CallbackQuery, day_service: DayService) -> None:
-    day_id = _int_arg(callback.data, 1)
-    if day_id is None:
+@router.callback_query(F.data.startswith("note:"))
+async def show_note_cb(callback: CallbackQuery, note_service: NoteService) -> None:
+    note_id = _int_arg(callback.data, 1)
+    if note_id is None:
         await callback.answer("Неверный запрос.")
         return
-    day = await day_service.select_day(callback.from_user.id, day_id)
-    if day is None:
+    note = await note_service.select_note(callback.from_user.id, note_id)
+    if note is None:
         await callback.answer("Заметка не найдена.")
         return
     await callback.answer("Продукты будут добавляться в эту заметку")
-    await _show_day(callback.message, day_service, day.id)
+    await _show_note(callback.message, note_service, note.id)
 
 
 # ---------- Добавление блюда ----------
@@ -266,13 +267,13 @@ async def add_food(
     message: Message,
     state: FSMContext,
     user_service: UserService,
-    day_service: DayService,
+    note_service: NoteService,
     food_service: FoodService,
 ) -> None:
     await user_service.register(message.from_user.id, message.from_user.username)
     if not await _has_goal(message, user_service, state):
         return
-    if await _need_day_choice(message, day_service):
+    if await _need_note_choice(message, note_service):
         return
     text = message.text.strip()
 
@@ -280,7 +281,7 @@ async def add_food(
     result = await food_service.try_add_exact(message.from_user.id, text)
     if result is not None:
         await message.answer(added_text(result))
-        await _show_day(message, day_service, result.day.id)
+        await _show_note(message, note_service, result.note.id)
         return
 
     # «круассан 60» или свободное описание — КБЖУ подбирает DeepSeek.
@@ -296,16 +297,16 @@ async def add_food(
         return
 
     await processing.edit_text(added_text(result))
-    await _show_day(message, day_service, result.day.id)
+    await _show_note(message, note_service, result.note.id)
 
 
 # ---------- Удаление продукта ----------
 @router.message(F.text == kb.MENU_DELETE, StateFilter(None))
-async def delete_start(message: Message, day_service: DayService) -> None:
-    if await _need_day_choice(message, day_service):
+async def delete_start(message: Message, note_service: NoteService) -> None:
+    if await _need_note_choice(message, note_service):
         return
-    day = await day_service.get_current_day(message.from_user.id)
-    summary = await day_service.get_summary(day.id)
+    note = await note_service.get_current_note(message.from_user.id)
+    summary = await note_service.get_summary(note.id)
     if summary is None or not summary.meals:
         await message.answer(
             "В этой заметке пока нечего удалять.",
@@ -314,39 +315,39 @@ async def delete_start(message: Message, day_service: DayService) -> None:
         return
     await message.answer(
         delete_prompt_text(summary.meals),
-        reply_markup=kb.delete_menu(day.id, summary.meals),
+        reply_markup=kb.delete_menu(note.id, summary.meals),
     )
 
 
 @router.callback_query(F.data.startswith("delpage:"))
-async def delete_page_cb(callback: CallbackQuery, day_service: DayService) -> None:
-    day_id = _int_arg(callback.data, 1)
+async def delete_page_cb(callback: CallbackQuery, note_service: NoteService) -> None:
+    note_id = _int_arg(callback.data, 1)
     page = _int_arg(callback.data, 2)
-    if day_id is None or page is None:
+    if note_id is None or page is None:
         await callback.answer("Неверный запрос.")
         return
-    summary = await day_service.get_summary_for_user(callback.from_user.id, day_id)
+    summary = await note_service.get_summary_for_user(callback.from_user.id, note_id)
     if summary is None or not summary.meals:
         await callback.answer("Продукты не найдены.")
         return
     await callback.answer()
     await callback.message.edit_reply_markup(
-        reply_markup=kb.delete_menu(day_id, summary.meals, page=page)
+        reply_markup=kb.delete_menu(note_id, summary.meals, page=page)
     )
 
 
 @router.callback_query(F.data.startswith("delmeal:"))
-async def delete_meal_cb(callback: CallbackQuery, day_service: DayService) -> None:
+async def delete_meal_cb(callback: CallbackQuery, note_service: NoteService) -> None:
     meal_id = _int_arg(callback.data, 1)
     if meal_id is None:
         await callback.answer("Неверный запрос.")
         return
-    result = await day_service.delete_meal(callback.from_user.id, meal_id)
+    result = await note_service.delete_meal(callback.from_user.id, meal_id)
     if result is None:
         await callback.answer("Продукт не найден.")
         return
     await callback.answer("Продукт удалён")
     await callback.message.edit_text(
-        f"{deleted_text(result)}\n\n{build_day_text(result.summary)}",
-        reply_markup=kb.day_actions(result.summary.day.id),
+        f"{deleted_text(result)}\n\n{build_note_text(result.summary)}",
+        reply_markup=kb.note_actions(result.summary.note.id),
     )

@@ -7,23 +7,23 @@ from aiogram.types import (
     ReplyKeyboardMarkup,
 )
 
-from bot.domain.models import DayInfo, Meal
+from bot.domain.models import Meal, NoteInfo
 
 MENU_GOAL = "🎯 Цель КБЖУ"
-MENU_NEW_DAY = "📝 Новая заметка"
+MENU_NEW_NOTE = "📝 Новая заметка"
 MENU_HISTORY = "📂 Выбрать заметку"
 MENU_DELETE = "🗑 Удалить продукт"
 MENU_PLAN = "ℹ️ Мой план"
 CANCEL = "❌ Отмена"
 
-MENU_TEXTS = {MENU_GOAL, MENU_NEW_DAY, MENU_HISTORY, MENU_DELETE, MENU_PLAN, CANCEL}
+MENU_TEXTS = {MENU_GOAL, MENU_NEW_NOTE, MENU_HISTORY, MENU_DELETE, MENU_PLAN, CANCEL}
 
 
 def main_menu() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text=MENU_GOAL)],
-            [KeyboardButton(text=MENU_NEW_DAY), KeyboardButton(text=MENU_HISTORY)],
+            [KeyboardButton(text=MENU_NEW_NOTE), KeyboardButton(text=MENU_HISTORY)],
             [KeyboardButton(text=MENU_DELETE)],
             [KeyboardButton(text=MENU_PLAN)],
         ],
@@ -38,38 +38,38 @@ def cancel_menu() -> ReplyKeyboardMarkup:
     )
 
 
-def history_menu(days: list[DayInfo]) -> InlineKeyboardMarkup:
+def history_menu(notes: list[NoteInfo]) -> InlineKeyboardMarkup:
     buttons = [
-        [InlineKeyboardButton(text=f"📅 {d.label}", callback_data=f"day:{d.id}")]
-        for d in days
+        [InlineKeyboardButton(text=f"📅 {n.label}", callback_data=f"note:{n.id}")]
+        for n in notes
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def day_actions(day_id: int) -> InlineKeyboardMarkup:
+def note_actions(note_id: int) -> InlineKeyboardMarkup:
     """Кнопки под карточкой заметки: удалить заметку."""
     rows = [
         [
             InlineKeyboardButton(
-                text="🗑 Удалить заметку", callback_data=f"delday:{day_id}"
+                text="🗑 Удалить заметку", callback_data=f"delnote:{note_id}"
             )
         ]
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def day_delete_confirm(day_id: int) -> InlineKeyboardMarkup:
+def note_delete_confirm(note_id: int) -> InlineKeyboardMarkup:
     """Подтверждение удаления заметки."""
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="✅ Удалить", callback_data=f"deldayok:{day_id}"
+                    text="✅ Удалить", callback_data=f"delnoteok:{note_id}"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="❌ Отмена", callback_data=f"deldayno:{day_id}"
+                    text="❌ Отмена", callback_data=f"delnoteno:{note_id}"
                 )
             ],
         ]
@@ -79,7 +79,7 @@ def day_delete_confirm(day_id: int) -> InlineKeyboardMarkup:
 DELETE_PAGE_SIZE = 8
 
 
-def delete_menu(day_id: int, meals: list[Meal], page: int = 0) -> InlineKeyboardMarkup:
+def delete_menu(note_id: int, meals: list[Meal], page: int = 0) -> InlineKeyboardMarkup:
     """Выбор продукта на удаление: номера идут в обратном порядке.
 
     Последний продукт заметки показывается первым. На странице не больше
@@ -106,7 +106,7 @@ def delete_menu(day_id: int, meals: list[Meal], page: int = 0) -> InlineKeyboard
             [
                 InlineKeyboardButton(
                     text="Далее",
-                    callback_data=f"delpage:{day_id}:{page + 1}",
+                    callback_data=f"delpage:{note_id}:{page + 1}",
                 )
             ]
         )
