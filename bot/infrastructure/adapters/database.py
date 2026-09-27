@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
 )
 
-from bot.domain.models import DayInfo, Food, Macros, Meal, User
+from bot.domain.models import Food, Macros, Meal, NoteInfo, User
 from bot.domain.services.interfaces import DatabaseInterface
 from bot.infrastructure import models as tables
 
@@ -71,92 +71,81 @@ class DatabaseAdapter(DatabaseInterface):
             )
             await session.commit()
 
-    async def set_active_day(self, user_id: int, day_id: int | None) -> None:
-        """Запомнить день для добавления продуктов (None — последний день)."""
+    async def set_active_note(self, user_id: int, note_id: int | None) -> None:
+        """Запомнить выбранную заметку (None — сбросить выбор)."""
         async with self._session() as session:
             await session.execute(
                 update(tables.User)
                 .where(tables.User.id == user_id)
-                .values(active_day_id=day_id)
+                .values(active_note_id=note_id)
             )
             await session.commit()
 
-    async def clear_active_day(self, user_id: int) -> None:
-        await self.set_active_day(user_id, None)
-
-    # ---------- days ----------
-    async def create_day(self, user_id: int, day: str) -> DayInfo:
+    # ---------- notes ----------
+    async def add_note(self, user_id: int, date: str, label: str) -> NoteInfo:
         async with self._session() as session:
-            count = await session.scalar(
-                select(func.count())
-                .select_from(tables.Day)
-                .where(tables.Day.user_id == user_id, tables.Day.date == day)
-            )
-            label = day if not count else f"{day} ({count + 1})"
-            day_id = await session.scalar(
-                insert(tables.Day)
-                .values(user_id=user_id, date=day, label=label)
-                .returning(tables.Day.id)
+            note_id = await session.scalar(
+                insert(tables.Note)
+                .values(user_id=user_id, date=date, label=label)
+                .returning(tables.Note.id)
             )
             await session.commit()
-        assert day_id is not None, "SQLite не вернул id созданного дня"
-        return DayInfo(id=day_id, user_id=user_id, date=day, label=label)
+        assert note_id is not None, "SQLite не вернул id созданной заметки"
+        return NoteInfo(id=note_id, user_id=user_id, date=date, label=label)
 
-    async def get_latest_day_id(self, user_id: int) -> int | None:
-        async with self._session() as session:
-            return await session.scalar(
-                select(tables.Day.id)
-                .where(tables.Day.user_id == user_id)
-                .order_by(tables.Day.id.desc())
-                .limit(1)
-            )
-
-    async def get_target_day(self, user_id: int, day: str) -> DayInfo:
-        """День для добавления продуктов: выбранный в истории или последний."""
-        user = await self.get_user(user_id)
-        if user is not None and user.active_day_id is not None:
-            selected = await self.get_day(user.active_day_id)
-            if selected is not None and selected.user_id == user_id:
-                return selected
-        return await self._get_current_day(user_id, day)
-
-    async def get_day(self, day_id: int) -> DayInfo | None:
+    async def get_note(self, note_id: int) -> NoteInfo | None:
         async with self._session() as session:
             row = (
-                await session.scalars(select(tables.Day).where(tables.Day.id == day_id))
+                await session.scalars(
+                    select(tables.Note).where(tables.Note.id == note_id)
+                )
             ).one_or_none()
-        return None if row is None else DayInfo.model_validate(row, from_attributes=True)
+        return (
+            None
+            if row is None
+            else NoteInfo.model_validate(row, from_attributes=True)
+        )
 
-    async def get_last_days(self, user_id: int, limit: int = 5) -> list[DayInfo]:
+    async def get_last_notes(self, user_id: int, limit: int = 5) -> list[NoteInfo]:
         async with self._session() as session:
             rows = (
                 await session.scalars(
-                    select(tables.Day)
-                    .where(tables.Day.user_id == user_id)
-                    .order_by(tables.Day.id.desc())
+                    select(tables.Note)
+                    .where(tables.Note.user_id == user_id)
+                    .order_by(tables.Note.id.desc())
                     .limit(limit)
                 )
             ).all()
-        return [DayInfo.model_validate(row, from_attributes=True) for row in rows]
+        return [NoteInfo.model_validate(row, from_attributes=True) for row in rows]
 
-    async def delete_day(self, day_id: int) -> None:
-        """Удалить день вместе с его записями.
+    async def count_notes(self, user_id: int, date: str) -> int:
+        """Сколько заметок пользователя создано на эту дату."""
+        async with self._session() as session:
+            count = await session.scalar(
+                select(func.count())
+                .select_from(tables.Note)
+                .where(tables.Note.user_id == user_id, tables.Note.date == date)
+            )
+        return count or 0
+
+    async def delete_note(self, note_id: int) -> None:
+        """Удалить заметку вместе с её записями.
 
         Каскад в SQLite по умолчанию выключен, поэтому записи чистим вручную.
         """
         async with self._session() as session:
             await session.execute(
-                delete(tables.Meal).where(tables.Meal.day_id == day_id)
+                delete(tables.Meal).where(tables.Meal.note_id == note_id)
             )
-            await session.execute(delete(tables.Day).where(tables.Day.id == day_id))
+            await session.execute(delete(tables.Note).where(tables.Note.id == note_id))
             await session.commit()
 
     # ---------- meals ----------
-    async def add_meal(self, day_id: int, food: Food) -> None:
+    async def add_meal(self, note_id: int, food: Food) -> None:
         async with self._session() as session:
             await session.execute(
                 insert(tables.Meal).values(
-                    day_id=day_id,
+                    note_id=note_id,
                     name=food.name,
                     calories=food.calories,
                     protein=food.protein,
@@ -166,12 +155,12 @@ class DatabaseAdapter(DatabaseInterface):
             )
             await session.commit()
 
-    async def get_meals(self, day_id: int) -> list[Meal]:
+    async def get_meals(self, note_id: int) -> list[Meal]:
         async with self._session() as session:
             rows = (
                 await session.scalars(
                     select(tables.Meal)
-                    .where(tables.Meal.day_id == day_id)
+                    .where(tables.Meal.note_id == note_id)
                     .order_by(tables.Meal.id)
                 )
             ).all()
@@ -191,7 +180,7 @@ class DatabaseAdapter(DatabaseInterface):
             await session.execute(delete(tables.Meal).where(tables.Meal.id == meal_id))
             await session.commit()
 
-    async def get_day_totals(self, day_id: int) -> Macros:
+    async def get_note_totals(self, note_id: int) -> Macros:
         async with self._session() as session:
             row = (
                 await session.execute(
@@ -204,7 +193,7 @@ class DatabaseAdapter(DatabaseInterface):
                         ),
                         func.coalesce(func.sum(tables.Meal.fat), 0).label("fat"),
                         func.coalesce(func.sum(tables.Meal.carbs), 0).label("carbs"),
-                    ).where(tables.Meal.day_id == day_id)
+                    ).where(tables.Meal.note_id == note_id)
                 )
             ).one()
         return Macros(
@@ -220,12 +209,3 @@ class DatabaseAdapter(DatabaseInterface):
         """Сессия на время одного запроса: соединение закроет ``NullPool``."""
         async with self._sessions() as session:
             yield session
-
-    async def _get_current_day(self, user_id: int, day: str) -> DayInfo:
-        """Последний день пользователя или новый, если дней ещё нет."""
-        latest = await self.get_latest_day_id(user_id)
-        if latest is None:
-            return await self.create_day(user_id, day)
-        current = await self.get_day(latest)
-        assert current is not None, "Последний день не найден в БД"
-        return current

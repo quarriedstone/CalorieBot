@@ -99,22 +99,22 @@ bot/
     databases/sqlite.py      # SqliteSettings — путь (DB_PATH) и URL для SQLAlchemy
   container.py               # Container — настройки, engine БД, сборка адаптеров и сервисов
   domain/                    # бизнес-логика
-    models.py                # модели: Macros, Food, Meal, DayInfo, User, DaySummary, …
+    models.py                # модели: Macros, Food, Meal, NoteInfo, User, NoteSummary, …
     services/                # доменные сервисы: один сервис — один файл
       user.py                # UserService — пользователь, цель КБЖУ и её разбор
-      day.py                 # DayService — заметки, история, сводка
+      note.py                # NoteService — заметки, история, сводка
       food.py                # FoodService — разбор ввода и добавление блюд
       common.py              # общие помощники сервисов
       interfaces/
-        database.py          # DatabaseInterface — порт хранилища
+        database.py          # DatabaseInterface — порт хранилища (примитивы CRUD)
   infrastructure/            # адаптеры к внешним зависимостям
     models/                  # SQLAlchemy-модели таблиц (metadata для Alembic и запросы адаптера)
       base.py                # Base
       user.py                # users
-      day.py                 # days
+      note.py                # notes
       meal.py                # meals
     adapters/
-      databases/sqlite.py    # DatabaseAdapter — SQLAlchemy-сессии на готовом engine (порт DatabaseInterface)
+      database.py            # DatabaseAdapter — SQLAlchemy-сессии на готовом engine (порт DatabaseInterface)
       deepseek.py            # DeepSeek API
   presentation/              # работа с Telegram
     handlers.py              # Router и обработчики сообщений/callback'ов

@@ -4,7 +4,7 @@ from dependency_injector import containers, providers
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
 
-from bot.domain.services import DayService, FoodService, UserService
+from bot.domain.services import FoodService, NoteService, UserService
 from bot.infrastructure.adapters.database import DatabaseAdapter
 from bot.infrastructure.adapters.deepseek import DeepSeekAdapter
 from bot.settings import AppSettings, DeepSeekSettings, SqliteSettings
@@ -32,5 +32,12 @@ class AppContainer(containers.DeclarativeContainer):
     )
 
     user_service = providers.Singleton(UserService, db=database_adapter)
-    day_service = providers.Singleton(DayService, db=database_adapter, users=user_service)
-    food_service = providers.Singleton(FoodService, db=database_adapter, deepseek=deepseek_adapter)
+    note_service = providers.Singleton(
+        NoteService, db=database_adapter, users=user_service
+    )
+    food_service = providers.Singleton(
+        FoodService,
+        db=database_adapter,
+        deepseek=deepseek_adapter,
+        notes=note_service,
+    )

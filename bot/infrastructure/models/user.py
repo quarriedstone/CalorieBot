@@ -10,13 +10,13 @@ from bot.infrastructure.models.base import Base
 
 
 class User(Base):
-    """Пользователь: имя, цель КБЖУ и выбранный день.
+    """Пользователь: имя, цель КБЖУ и выбранная заметка.
 
     Атрибуты названы как поля доменной модели, поэтому строка БД превращается
     в :class:`bot.domain.models.User` без ручного маппинга.
 
-    ``active_day_id`` — без внешнего ключа: в схеме это обычная колонка,
-    а ссылка на день проверяется в доменных сервисах.
+    ``active_note_id`` — без внешнего ключа: в схеме это обычная колонка,
+    а ссылка на заметку проверяется в доменных сервисах.
     """
 
     __tablename__ = "users"
@@ -27,7 +27,7 @@ class User(Base):
     goal_protein: Mapped[float | None] = mapped_column(REAL())
     goal_fat: Mapped[float | None] = mapped_column(REAL())
     goal_carbs: Mapped[float | None] = mapped_column(REAL())
-    active_day_id: Mapped[int | None] = mapped_column()
+    active_note_id: Mapped[int | None] = mapped_column()
     created_at: Mapped[str] = mapped_column(
         Text(), server_default=text("(datetime('now'))")
     )

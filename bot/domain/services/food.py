@@ -11,8 +11,8 @@ from bot.domain.models import (
     PortionFood,
     StructuredFood,
 )
-from bot.domain.services.common import today
 from bot.domain.services.interfaces import DatabaseInterface
+from bot.domain.services.note import NoteService
 from bot.infrastructure.adapters.deepseek import DeepSeekAdapter
 
 __all__ = ["FoodNotFoundError", "FoodService"]
@@ -52,9 +52,15 @@ class FoodNotFoundError(Exception):
 class FoodService:
     """Добавление блюда: точный расчёт по БЖУ или оценка через DeepSeek."""
 
-    def __init__(self, db: DatabaseInterface, deepseek: DeepSeekAdapter) -> None:
+    def __init__(
+        self,
+        db: DatabaseInterface,
+        deepseek: DeepSeekAdapter,
+        notes: NoteService,
+    ) -> None:
         self._db = db
         self._deepseek = deepseek
+        self._notes = notes
 
     async def try_add_exact(self, user_id: int, text: str) -> AddFoodResult | None:
         """Точный расчёт по указанным Б/Ж/У, без обращения к API.
@@ -101,7 +107,7 @@ class FoodService:
 
         Название берётся из ответа модели. Если модель вернула found=false
         (это не продукт питания), бросает :class:`FoodNotFoundError` —
-        запись в день не добавляется.
+        запись в заметку не добавляется.
         """
         structured = self._parse_structured(text)
         weight_hint = structured.weight if structured is not None else None
@@ -119,12 +125,12 @@ class FoodService:
 
     # ---------- внутренние методы ----------
     async def _store(self, user_id: int, food: Food) -> AddFoodResult:
-        day = await self._db.get_target_day(user_id, today())
-        await self._db.add_meal(day.id, food)
+        note = await self._notes.get_current_note(user_id)
+        await self._db.add_meal(note.id, food)
         return AddFoodResult(
             food=food,
-            day=day,
-            is_latest=(await self._db.get_latest_day_id(user_id)) == day.id,
+            note=note,
+            is_latest=await self._notes.is_latest_note(user_id, note.id),
         )
 
     @staticmethod

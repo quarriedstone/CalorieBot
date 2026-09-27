@@ -9,13 +9,13 @@ from bot.infrastructure.models.base import Base
 
 
 class Meal(Base):
-    """Блюдо внутри дня (записи КБЖУ)."""
+    """Блюдо внутри заметки (записи КБЖУ)."""
 
     __tablename__ = "meals"
     __table_args__ = {"sqlite_autoincrement": True}
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    day_id: Mapped[int] = mapped_column(ForeignKey("days.id", ondelete="CASCADE"))
+    note_id: Mapped[int] = mapped_column(ForeignKey("notes.id", ondelete="CASCADE"))
     name: Mapped[str] = mapped_column(Text())
     calories: Mapped[float] = mapped_column(REAL(), server_default=text("0"))
     protein: Mapped[float] = mapped_column(REAL(), server_default=text("0"))

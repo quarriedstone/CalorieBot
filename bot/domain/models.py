@@ -9,7 +9,7 @@ CALORIES_PER_CARB = 4.0
 
 
 class Macros(BaseModel):
-    """Калории и БЖУ без названия (цель, итоги дня)."""
+    """Калории и БЖУ без названия (цель, итоги заметки)."""
 
     calories: float
     protein: float
@@ -38,14 +38,14 @@ class Food(Macros):
 
 
 class Meal(Food):
-    """Блюдо из таблицы дня: КБЖУ, id записи и день, к которому она относится."""
+    """Блюдо из заметки: КБЖУ, id записи и заметка, к которой она относится."""
 
     id: int
-    day_id: int
+    note_id: int
 
 
-class DayInfo(BaseModel):
-    """Запись дня."""
+class NoteInfo(BaseModel):
+    """Заметка: дата, название и владелец."""
 
     id: int
     user_id: int
@@ -54,18 +54,18 @@ class DayInfo(BaseModel):
 
 
 class User(BaseModel):
-    """Пользователь: имя, цель КБЖУ и выбранный день."""
+    """Пользователь: имя, цель КБЖУ и выбранная заметка."""
 
     id: int
     username: str | None = None
     goal: Macros | None = None
-    active_day_id: int | None = None
+    active_note_id: int | None = None
 
 
-class DaySummary(BaseModel):
-    """Сводка дня: блюда, итоги, цель и признак «последний ли это день»."""
+class NoteSummary(BaseModel):
+    """Сводка заметки: блюда, итоги, цель и признак «последняя ли она»."""
 
-    day: DayInfo
+    note: NoteInfo
     meals: list[Meal]
     totals: Macros
     goal: Macros | None = None
@@ -76,15 +76,15 @@ class AddFoodResult(BaseModel):
     """Результат добавления блюда."""
 
     food: Food
-    day: DayInfo
+    note: NoteInfo
     is_latest: bool
 
 
 class DeleteMealResult(BaseModel):
-    """Результат удаления блюда: что удалили и обновлённая сводка дня."""
+    """Результат удаления блюда: что удалили и обновлённая сводка заметки."""
 
     food: Food
-    summary: DaySummary
+    summary: NoteSummary
 
 
 class StructuredFood(BaseModel):

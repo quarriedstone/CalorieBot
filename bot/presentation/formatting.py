@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from bot.domain.models import AddFoodResult, DaySummary, DeleteMealResult, Food, Macros
+from bot.domain.models import AddFoodResult, DeleteMealResult, Food, Macros, NoteSummary
 
 HELP_TEXT = (
     "👋 Я помогу следить за КБЖУ.\n\n"
@@ -31,11 +31,11 @@ NO_GOAL_PROMPT = f"{NO_GOAL_TEXT}\n\n{GOAL_PROMPT}"
 
 DELETE_PROMPT = "🗑 Выберите продукт для удаления:"
 
-SELECT_DAY_PROMPT = "📅 Сначала выберите заметку — нажмите на нужную в списке ниже."
+SELECT_NOTE_PROMPT = "📅 Сначала выберите заметку — нажмите на нужную в списке ниже."
 
-NO_DAY_TEXT = "❗️ Сначала создайте новую заметку!"
-NO_DAY_PROMPT = (
-    f"{NO_DAY_TEXT}\n\n"
+NO_NOTE_TEXT = "❗️ Сначала создайте новую заметку!"
+NO_NOTE_PROMPT = (
+    f"{NO_NOTE_TEXT}\n\n"
     "Заметок пока нет: нажмите «📝 Новая заметка», а затем напишите, что съели."
 )
 
@@ -66,7 +66,7 @@ def food_str(f: Food) -> str:
 def added_text(result: AddFoodResult) -> str:
     text = f"✅ Добавлено: {result.food.name} — {food_str(result.food)}"
     if not result.is_latest:
-        text += f"\n✏️ Записано в заметку {result.day.label}."
+        text += f"\n✏️ Записано в заметку {result.note.label}."
     return text
 
 
@@ -74,16 +74,16 @@ def deleted_text(result: DeleteMealResult) -> str:
     return f"🗑 Удалено: {result.food.name} — {food_str(result.food)}"
 
 
-def confirm_day_delete_text(summary: DaySummary) -> str:
+def confirm_note_delete_text(summary: NoteSummary) -> str:
     """Вопрос перед удалением заметки вместе с записями."""
     return (
-        f"🗑 Удалить заметку {summary.day.label} вместе со всеми записями?\n"
+        f"🗑 Удалить заметку {summary.note.label} вместе со всеми записями?\n"
         f"Записей: {len(summary.meals)} · итого {macros_str(summary.totals)}\n\n"
         "Действие нельзя отменить."
     )
 
 
-def day_deleted_text(label: str) -> str:
+def note_deleted_text(label: str) -> str:
     return f"🗑 Заметка {label} удалена."
 
 
@@ -104,8 +104,8 @@ def delete_prompt_text(meals: list[Food]) -> str:
     return "\n".join(lines)
 
 
-def build_day_text(summary: DaySummary) -> str:
-    lines = [f"📅 {summary.day.label}", ""]
+def build_note_text(summary: NoteSummary) -> str:
+    lines = [f"📅 {summary.note.label}", ""]
     if summary.meals:
         for i, meal in enumerate(summary.meals, 1):
             lines.append(f"{i}. {meal.name} — {food_str(meal)}")

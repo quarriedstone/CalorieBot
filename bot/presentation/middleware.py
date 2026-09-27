@@ -13,7 +13,7 @@ class ContainerMiddleware(BaseMiddleware):
 
     def __init__(self, container: AppContainer) -> None:
         self._user_service = container.user_service()
-        self._day_service = container.day_service()
+        self._note_service = container.note_service()
         self._food_service = container.food_service()
 
     async def __call__(
@@ -23,6 +23,6 @@ class ContainerMiddleware(BaseMiddleware):
         data: dict[str, Any],
     ) -> Any:
         data["user_service"] = self._user_service
-        data["day_service"] = self._day_service
+        data["note_service"] = self._note_service
         data["food_service"] = self._food_service
         return await handler(event, data)

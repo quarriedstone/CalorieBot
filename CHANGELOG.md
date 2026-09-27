@@ -24,6 +24,9 @@
 
 ### Changed
 
+- Сущность «день» переименована в «заметку» и в коде: `DayService` → `NoteService`, `DayInfo` → `NoteInfo`, `DaySummary` → `NoteSummary`, `day_id` → `note_id`, `User.active_day_id` → `active_note_id`; методы порта и адаптера (`add_day`/`get_day`/`get_last_days`/`count_days`/`delete_day`/`set_active_day`/`get_day_totals` → `add_note`/`get_note`/`get_last_notes`/`count_notes`/`delete_note`/`set_active_note`/`get_note_totals`) и сервиса (`start_new_day`/`get_current_day`/`select_day`/`get_selected_day`/`delete_day`/`is_latest_day` → `start_new_note`/`get_current_note`/`select_note`/`get_selected_note`/`delete_note`/`is_latest_note`); ключ DI `day_service` → `note_service`, callback'и `day:` / `delday:` / `deldayok:` / `deldayno:` → `note:` / `delnote:` / `delnoteok:` / `delnoteno:`; таблица `days` → `notes`, колонка `day` → `date`, `meals.day_id` → `note_id`.
+- Миграция `b7d2c4e91a30` переименовывает схему на месте (`ALTER TABLE … RENAME TO/COLUMN`, SQLite 3.25+), поэтому данные, автоинкремент и внешний ключ `meals.note_id` сохраняются без пересоздания таблиц.
+- Порт хранилища стал тонким: дневные операции — только примитивы (`add_day`, `get_day`, `count_days`, `get_last_days`, `delete_day`), а выбор активной/текущей заметки, генерация её названия (`2026-09-27 (2)`) и проверка владельца переехали в `DayService`; `FoodService` получил зависимость `DayService` (`get_current_day()`, `is_latest_day()`) вместо удалённых методов порта.
 - Модуль `bot/domain/parsing.py` расформирован: разбор форматов еды и пересчёт КБЖУ переехали в `FoodService` (приватные методы), разбор цели — в публичный метод `UserService.parse_goal()`, а модели разбора `StructuredFood` и `PortionFood` — в `bot/domain/models.py`; общая формула калорий стала фабрикой `Macros.from_bju()`.
 - Название блюда при распознавании через DeepSeek берётся из ответа модели как есть (раньше переопределялось локально на «Название (вес г)»).
 - Перешли на DeepSeek **Responses API** (`client.responses.create`) со строгой JSON-схемой ответа (`text.format` = `json_schema`); модель по умолчанию — `deepseek-flash` (было `deepseek-chat` через Chat Completions).
@@ -49,6 +52,8 @@
 
 ### Removed
 
+- Старые модули `bot/domain/services/day.py` (`DayService`) и `bot/infrastructure/models/day.py` (таблица `days`) — заменены на `bot/domain/services/note.py` (`NoteService`) и `bot/infrastructure/models/note.py` (таблица `notes`).
+- Методы `create_day`, `get_target_day`, `get_latest_day_id` и `clear_active_day` из `DatabaseInterface`/`DatabaseAdapter` — вместо них примитивы `add_day()` с явным `label` и `count_days()`, а логика выбора и названия заметок — в `DayService` (сброс выбора — `set_active_day(user_id, None)`).
 - Модуль `bot/domain/parsing.py` — его технические функции живут в сервисах, которые их используют (`FoodService`, `UserService`), а модели — в `bot/domain/models.py`; отдельный модуль парсинга больше не нужен.
 - Кнопка «↩️ Текущий день» на карточке дня и метод `DayService.back_to_today()` — заметка выбирается заново из списка, отдельный возврат к последней не нужен.
 - Метод `DayService.needs_day_choice()` — его поведение («заметок нет — не блокируем, первый день создастся сам») и было причиной неявного создания заметки; теперь бот проверяет активную заметку напрямую (`get_selected_day`).
