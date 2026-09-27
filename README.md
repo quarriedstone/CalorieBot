@@ -100,11 +100,10 @@ bot/
   container.py               # Container — настройки, engine БД, сборка адаптеров и сервисов
   domain/                    # бизнес-логика
     models.py                # модели: Macros, Food, Meal, DayInfo, User, DaySummary, …
-    parsing.py               # разбор цели и форматов ввода, пересчёт КБЖУ
     services/                # доменные сервисы: один сервис — один файл
-      user.py                # UserService — пользователь и цель КБЖУ
+      user.py                # UserService — пользователь, цель КБЖУ и её разбор
       day.py                 # DayService — заметки, история, сводка
-      food.py                # FoodService — добавление блюд
+      food.py                # FoodService — разбор ввода и добавление блюд
       common.py              # общие помощники сервисов
       interfaces/
         database.py          # DatabaseInterface — порт хранилища

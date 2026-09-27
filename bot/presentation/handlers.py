@@ -9,7 +9,6 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 
 from bot.domain.models import DaySummary
-from bot.domain.parsing import parse_goal
 from bot.domain.services import (
     DayService,
     FoodNotFoundError,
@@ -139,7 +138,7 @@ async def goal_input(
     state: FSMContext,
     user_service: UserService,
 ) -> None:
-    goal = parse_goal(message.text or "")
+    goal = user_service.parse_goal(message.text or "")
     if goal is None:
         await message.answer(NO_GOAL_PROMPT)
         return

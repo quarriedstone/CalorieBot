@@ -23,7 +23,7 @@ class AppContainer(containers.DeclarativeContainer):
         create_async_engine, sqlite_settings.provided.url, poolclass=NullPool
     )
 
-    sqlite_adapter = providers.Singleton(DatabaseAdapter, engine=sqlite_engine)
+    database_adapter = providers.Singleton(DatabaseAdapter, engine=sqlite_engine)
     deepseek_adapter = providers.Singleton(
         DeepSeekAdapter,
         api_key=deepseek_settings.provided.api_key,
@@ -31,6 +31,6 @@ class AppContainer(containers.DeclarativeContainer):
         model=deepseek_settings.provided.model,
     )
 
-    user_service = providers.Singleton(UserService, db=sqlite_adapter)
-    day_service = providers.Singleton(DayService, db=sqlite_adapter, users=user_service)
-    food_service = providers.Singleton(FoodService, db=sqlite_adapter, deepseek=deepseek_adapter)
+    user_service = providers.Singleton(UserService, db=database_adapter)
+    day_service = providers.Singleton(DayService, db=database_adapter, users=user_service)
+    food_service = providers.Singleton(FoodService, db=database_adapter, deepseek=deepseek_adapter)

@@ -24,6 +24,7 @@
 
 ### Changed
 
+- Модуль `bot/domain/parsing.py` расформирован: разбор форматов еды и пересчёт КБЖУ переехали в `FoodService` (приватные методы), разбор цели — в публичный метод `UserService.parse_goal()`, а модели разбора `StructuredFood` и `PortionFood` — в `bot/domain/models.py`; общая формула калорий стала фабрикой `Macros.from_bju()`.
 - Название блюда при распознавании через DeepSeek берётся из ответа модели как есть (раньше переопределялось локально на «Название (вес г)»).
 - Перешли на DeepSeek **Responses API** (`client.responses.create`) со строгой JSON-схемой ответа (`text.format` = `json_schema`); модель по умолчанию — `deepseek-flash` (было `deepseek-chat` через Chat Completions).
 - В ответе модели появились `found`, `confidence` и `reason`: непищевые и неизвестные вводы больше не добавляются как блюдо.
@@ -48,6 +49,7 @@
 
 ### Removed
 
+- Модуль `bot/domain/parsing.py` — его технические функции живут в сервисах, которые их используют (`FoodService`, `UserService`), а модели — в `bot/domain/models.py`; отдельный модуль парсинга больше не нужен.
 - Кнопка «↩️ Текущий день» на карточке дня и метод `DayService.back_to_today()` — заметка выбирается заново из списка, отдельный возврат к последней не нужен.
 - Метод `DayService.needs_day_choice()` — его поведение («заметок нет — не блокируем, первый день создастся сам») и было причиной неявного создания заметки; теперь бот проверяет активную заметку напрямую (`get_selected_day`).
 - Публичный `get_current_day()` у `DatabaseInterface` и `DatabaseAdapter` — используется только внутри `get_target_day()`, стал приватным `_get_current_day()`.
