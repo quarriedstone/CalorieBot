@@ -12,11 +12,20 @@ from bot.domain.models import Meal, NoteInfo
 MENU_GOAL = "🎯 Цель КБЖУ"
 MENU_NEW_NOTE = "📝 Новая заметка"
 MENU_HISTORY = "📂 Выбрать заметку"
-MENU_DELETE = "🗑 Удалить продукт"
+MENU_DELETE_NOTE = "🗑 Удалить заметку"
 MENU_PLAN = "ℹ️ Мой план"
 CANCEL = "❌ Отмена"
 
-MENU_TEXTS = {MENU_GOAL, MENU_NEW_NOTE, MENU_HISTORY, MENU_DELETE, MENU_PLAN, CANCEL}
+DELETE_PRODUCT = "🗑 Удалить продукт"
+
+MENU_TEXTS = {
+    MENU_GOAL,
+    MENU_NEW_NOTE,
+    MENU_HISTORY,
+    MENU_DELETE_NOTE,
+    MENU_PLAN,
+    CANCEL,
+}
 
 
 def main_menu() -> ReplyKeyboardMarkup:
@@ -24,7 +33,7 @@ def main_menu() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text=MENU_GOAL)],
             [KeyboardButton(text=MENU_NEW_NOTE), KeyboardButton(text=MENU_HISTORY)],
-            [KeyboardButton(text=MENU_DELETE)],
+            [KeyboardButton(text=MENU_DELETE_NOTE)],
             [KeyboardButton(text=MENU_PLAN)],
         ],
         resize_keyboard=True,
@@ -47,11 +56,11 @@ def history_menu(notes: list[NoteInfo]) -> InlineKeyboardMarkup:
 
 
 def note_actions(note_id: int) -> InlineKeyboardMarkup:
-    """Кнопки под карточкой заметки: удалить заметку."""
+    """Кнопки под карточкой заметки: удалить продукт из этой заметки."""
     rows = [
         [
             InlineKeyboardButton(
-                text="🗑 Удалить заметку", callback_data=f"delnote:{note_id}"
+                text=DELETE_PRODUCT, callback_data=f"delproduct:{note_id}"
             )
         ]
     ]

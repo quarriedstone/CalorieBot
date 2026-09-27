@@ -180,13 +180,17 @@ async def new_note(message: Message, note_service: NoteService) -> None:
 
 
 # ---------- Удаление заметки ----------
-@router.callback_query(F.data.startswith("delnote:"))
-async def delete_note_ask(callback: CallbackQuery, note_service: NoteService) -> None:
-    summary = await _own_summary(callback, note_service)
-    if summary is None:
+@router.message(F.text == kb.MENU_DELETE_NOTE, StateFilter(None))
+async def delete_note_start(message: Message, note_service: NoteService) -> None:
+    """Удаление заметки из главного меню: подтверждаем и удаляем выбранную."""
+    if await _need_note_choice(message, note_service):
         return
-    await callback.answer()
-    await callback.message.edit_text(
+    note = await note_service.get_current_note(message.from_user.id)
+    summary = await note_service.get_summary(note.id)
+    if summary is None:
+        await message.answer("Заметка не найдена.", reply_markup=kb.main_menu())
+        return
+    await message.answer(
         confirm_note_delete_text(summary),
         reply_markup=kb.note_delete_confirm(summary.note.id),
     )
@@ -301,21 +305,21 @@ async def add_food(
 
 
 # ---------- Удаление продукта ----------
-@router.message(F.text == kb.MENU_DELETE, StateFilter(None))
-async def delete_start(message: Message, note_service: NoteService) -> None:
-    if await _need_note_choice(message, note_service):
+@router.callback_query(F.data.startswith("delproduct:"))
+async def delete_product_start(
+    callback: CallbackQuery, note_service: NoteService
+) -> None:
+    """Удаление продукта кнопкой на карточке заметки."""
+    summary = await _own_summary(callback, note_service)
+    if summary is None:
         return
-    note = await note_service.get_current_note(message.from_user.id)
-    summary = await note_service.get_summary(note.id)
-    if summary is None or not summary.meals:
-        await message.answer(
-            "В этой заметке пока нечего удалять.",
-            reply_markup=kb.main_menu(),
-        )
+    if not summary.meals:
+        await callback.answer("В этой заметке пока нечего удалять.")
         return
-    await message.answer(
+    await callback.answer()
+    await callback.message.edit_text(
         delete_prompt_text(summary.meals),
-        reply_markup=kb.delete_menu(note.id, summary.meals),
+        reply_markup=kb.delete_menu(summary.note.id, summary.meals),
     )
 
 

@@ -49,6 +49,7 @@
 - Настройки БД убраны из `bot/config.py` и переехали в `SqliteSettings`; в контейнере появились провайдеры `sqlite_settings` и `sqlite_engine`: URL и async-движок (`NullPool`) создаются в `AppContainer`, а в `DatabaseAdapter` передаётся готовый движок — адаптер не знает ни про путь к файлу БД, ни про драйвер.
 - Модуль `bot/config.py` переехал в `bot/settings/config.py` (класс `AppSettings` — только `BOT_TOKEN`), параметры DeepSeek вынесены в `DeepSeekSettings`: адаптер DeepSeek получает их из провайдера `deepseek_settings`, а `main.py` берёт токен бота из контейнера (`container.app_settings().bot_token`) вместо глобального `settings`. В классах настроек `model_config` объявляется после полей.
 - `alembic/env.py` берёт URL из `SqliteSettings`, а не собирает его вручную из `os.getenv("DB_PATH")`.
+- Кнопки удаления поменялись местами: «🗑 Удалить продукт» стала inline-кнопкой на карточке заметки (открывает нумерованный список блюд этой заметки), а «🗑 Удалить заметку» — кнопкой главного меню (удаляет выбранную заметку после подтверждения).
 
 ### Removed
 

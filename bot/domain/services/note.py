@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 from bot.domain.models import DeleteMealResult, NoteInfo, NoteSummary
-from bot.domain.services.common import today
 from bot.domain.services.interfaces import DatabaseInterface
 from bot.domain.services.user import UserService
 
@@ -112,7 +113,7 @@ class NoteService:
     # ---------- внутренние методы ----------
     async def _create_note(self, user_id: int) -> NoteInfo:
         """Создать заметку на сегодня с уникальным названием."""
-        date = today()
+        date = self._today()
         count = await self._db.count_notes(user_id, date)
         label = date if not count else f"{date} ({count + 1})"
         return await self._db.add_note(user_id, date, label)
@@ -127,3 +128,8 @@ class NoteService:
         if note is None or note.user_id != user_id:
             return None
         return note
+
+    @staticmethod
+    def _today() -> str:
+        """Сегодняшняя дата в формате ISO."""
+        return date.today().isoformat()
