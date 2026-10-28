@@ -17,6 +17,7 @@ class User(Base):
 
     ``active_note_id`` — без внешнего ключа: в схеме это обычная колонка,
     а ссылка на заметку проверяется в доменных сервисах.
+    ``paid_until`` — ISO-время окончания подписки (UTC) или ``NULL``.
     """
 
     __tablename__ = "users"
@@ -28,6 +29,7 @@ class User(Base):
     goal_fat: Mapped[float | None] = mapped_column(REAL())
     goal_carbs: Mapped[float | None] = mapped_column(REAL())
     active_note_id: Mapped[int | None] = mapped_column()
+    paid_until: Mapped[str | None] = mapped_column(Text())
     created_at: Mapped[str] = mapped_column(
         Text(), server_default=text("(datetime('now'))")
     )

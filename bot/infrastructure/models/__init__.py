@@ -9,6 +9,7 @@ from __future__ import annotations
 from bot.infrastructure.models.base import Base
 from bot.infrastructure.models.meal import Meal
 from bot.infrastructure.models.note import Note
+from bot.infrastructure.models.payment import Payment
 from bot.infrastructure.models.user import User
 
-__all__ = ["Base", "Meal", "Note", "User"]
+__all__ = ["Base", "Meal", "Note", "Payment", "User"]

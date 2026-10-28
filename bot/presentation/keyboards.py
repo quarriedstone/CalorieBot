@@ -14,6 +14,7 @@ MENU_NEW_NOTE = "📝 Новая заметка"
 MENU_HISTORY = "📂 Выбрать заметку"
 MENU_DELETE_NOTE = "🗑 Удалить заметку"
 MENU_PLAN = "ℹ️ Мой план"
+MENU_SUBSCRIBE = "💎 Подписка"
 CANCEL = "❌ Отмена"
 
 DELETE_PRODUCT = "🗑 Удалить продукт"
@@ -24,6 +25,7 @@ MENU_TEXTS = {
     MENU_HISTORY,
     MENU_DELETE_NOTE,
     MENU_PLAN,
+    MENU_SUBSCRIBE,
     CANCEL,
 }
 
@@ -34,7 +36,7 @@ def main_menu() -> ReplyKeyboardMarkup:
             [KeyboardButton(text=MENU_GOAL)],
             [KeyboardButton(text=MENU_NEW_NOTE), KeyboardButton(text=MENU_HISTORY)],
             [KeyboardButton(text=MENU_DELETE_NOTE)],
-            [KeyboardButton(text=MENU_PLAN)],
+            [KeyboardButton(text=MENU_PLAN), KeyboardButton(text=MENU_SUBSCRIBE)],
         ],
         resize_keyboard=True,
     )
@@ -44,6 +46,22 @@ def cancel_menu() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text=CANCEL)]],
         resize_keyboard=True,
+    )
+
+
+PAY_CALLBACK = "pay:subscribe"
+
+
+def pay_button(price: int) -> InlineKeyboardMarkup:
+    """Кнопка оплаты подписки звёздами Telegram."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=f"Оплатить {price} ⭐", callback_data=PAY_CALLBACK
+                )
+            ]
+        ]
     )
 
 

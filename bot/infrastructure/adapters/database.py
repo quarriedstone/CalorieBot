@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
 )
 
-from bot.domain.models import Food, Macros, Meal, NoteInfo, User
+from bot.domain.models import Food, Macros, Meal, NoteInfo, Payment, User
 from bot.domain.services.interfaces import DatabaseInterface
 from bot.infrastructure import models as tables
 
@@ -81,6 +81,16 @@ class DatabaseAdapter(DatabaseInterface):
             )
             await session.commit()
 
+    async def set_paid_until(self, user_id: int, paid_until: str | None) -> None:
+        """Запомнить конец подписки (None — снять подписку)."""
+        async with self._session() as session:
+            await session.execute(
+                update(tables.User)
+                .where(tables.User.id == user_id)
+                .values(paid_until=paid_until)
+            )
+            await session.commit()
+
     # ---------- notes ----------
     async def add_note(self, user_id: int, date: str, label: str) -> NoteInfo:
         async with self._session() as session:
@@ -144,6 +154,16 @@ class DatabaseAdapter(DatabaseInterface):
             await session.execute(delete(tables.Note).where(tables.Note.id == note_id))
             await session.commit()
 
+    async def count_user_notes(self, user_id: int) -> int:
+        """Сколько всего заметок у пользователя (для лимитов тарифа)."""
+        async with self._session() as session:
+            count = await session.scalar(
+                select(func.count())
+                .select_from(tables.Note)
+                .where(tables.Note.user_id == user_id)
+            )
+        return count or 0
+
     # ---------- meals ----------
     async def add_meal(self, note_id: int, food: Food) -> None:
         async with self._session() as session:
@@ -169,6 +189,16 @@ class DatabaseAdapter(DatabaseInterface):
                 )
             ).all()
         return [Meal.model_validate(row, from_attributes=True) for row in rows]
+
+    async def count_meals(self, note_id: int) -> int:
+        """Сколько записей о еде в заметке (для лимитов тарифа)."""
+        async with self._session() as session:
+            count = await session.scalar(
+                select(func.count())
+                .select_from(tables.Meal)
+                .where(tables.Meal.note_id == note_id)
+            )
+        return count or 0
 
     async def get_meal(self, meal_id: int) -> Meal | None:
         async with self._session() as session:
@@ -206,6 +236,71 @@ class DatabaseAdapter(DatabaseInterface):
             fat=float(row.fat),
             carbs=float(row.carbs),
         )
+
+    # ---------- payments ----------
+    async def add_payment(
+        self, user_id: int, payload: str, amount: int, currency: str, days: int
+    ) -> Payment:
+        async with self._session() as session:
+            payment_id = await session.scalar(
+                insert(tables.Payment)
+                .values(
+                    user_id=user_id,
+                    payload=payload,
+                    amount=amount,
+                    currency=currency,
+                    days=days,
+                )
+                .returning(tables.Payment.id)
+            )
+            await session.commit()
+        assert payment_id is not None, "SQLite не вернул id созданного счёта"
+        return Payment(
+            id=payment_id,
+            user_id=user_id,
+            payload=payload,
+            amount=amount,
+            currency=currency,
+            days=days,
+        )
+
+    async def get_payment_by_payload(self, payload: str) -> Payment | None:
+        async with self._session() as session:
+            row = (
+                await session.scalars(
+                    select(tables.Payment).where(tables.Payment.payload == payload)
+                )
+            ).one_or_none()
+        return (
+            None
+            if row is None
+            else Payment.model_validate(row, from_attributes=True)
+        )
+
+    async def mark_payment_paid(
+        self,
+        payment_id: int,
+        telegram_charge_id: str,
+        provider_charge_id: str | None,
+    ) -> bool:
+        """Отметить счёт оплаченным; False — он уже был оплачен раньше."""
+        async with self._session() as session:
+            updated = await session.scalar(
+                update(tables.Payment)
+                .where(
+                    tables.Payment.id == payment_id,
+                    tables.Payment.status == "pending",
+                )
+                .values(
+                    status="paid",
+                    telegram_charge_id=telegram_charge_id,
+                    provider_charge_id=provider_charge_id,
+                    paid_at=func.datetime("now"),
+                )
+                .returning(tables.Payment.id)
+            )
+            await session.commit()
+        return updated is not None
 
     # ---------- внутренние методы ----------
     @asynccontextmanager

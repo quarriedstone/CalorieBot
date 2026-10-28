@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from bot.domain.models import Food, Macros, Meal, NoteInfo, User
+from bot.domain.models import Food, Macros, Meal, NoteInfo, Payment, User
 
 
 class DatabaseInterface(Protocol):
@@ -38,12 +38,16 @@ class DatabaseInterface(Protocol):
 
     async def set_active_note(self, user_id: int, note_id: int | None) -> None: ...
 
+    async def set_paid_until(self, user_id: int, paid_until: str | None) -> None: ...
+
     # ---------- notes ----------
     async def add_note(self, user_id: int, date: str, label: str) -> NoteInfo: ...
 
     async def get_note(self, note_id: int) -> NoteInfo | None: ...
 
     async def count_notes(self, user_id: int, date: str) -> int: ...
+
+    async def count_user_notes(self, user_id: int) -> int: ...
 
     async def get_last_notes(
         self, user_id: int, limit: int = 5, offset: int = 0
@@ -56,8 +60,24 @@ class DatabaseInterface(Protocol):
 
     async def get_meals(self, note_id: int) -> list[Meal]: ...
 
+    async def count_meals(self, note_id: int) -> int: ...
+
     async def get_meal(self, meal_id: int) -> Meal | None: ...
 
     async def delete_meal(self, meal_id: int) -> None: ...
 
     async def get_note_totals(self, note_id: int) -> Macros: ...
+
+    # ---------- payments ----------
+    async def add_payment(
+        self, user_id: int, payload: str, amount: int, currency: str, days: int
+    ) -> Payment: ...
+
+    async def get_payment_by_payload(self, payload: str) -> Payment | None: ...
+
+    async def mark_payment_paid(
+        self,
+        payment_id: int,
+        telegram_charge_id: str,
+        provider_charge_id: str | None,
+    ) -> bool: ...
