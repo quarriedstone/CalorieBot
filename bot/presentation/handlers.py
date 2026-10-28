@@ -6,32 +6,48 @@ from aiogram import F, Router
 from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, Message
+from aiogram.types import (
+    CallbackQuery,
+    LabeledPrice,
+    Message,
+    PreCheckoutQuery,
+)
 
 from bot.domain.models import NoteInfo, NoteSummary
 from bot.domain.services import (
     FoodNotFoundError,
     FoodService,
     NoteService,
+    PaymentService,
     UserService,
 )
 from bot.presentation import keyboards as kb
 from bot.presentation.formatting import (
     GOAL_PROMPT,
+    GRANT_USAGE,
     HELP_TEXT,
     NO_GOAL_PROMPT,
     NO_NOTE_PROMPT,
+    REVOKE_USAGE,
     SELECT_NOTE_PROMPT,
     added_text,
     build_note_text,
     confirm_note_delete_text,
     delete_prompt_text,
     deleted_text,
+    granted_text,
     history_text,
     macros_str,
+    meal_limit_text,
     not_found_text,
     note_deleted_text,
+    note_limit_text,
+    payment_success_text,
+    revoked_text,
+    subscription_line,
+    subscription_text,
 )
+from bot.settings import PaymentsSettings
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -47,6 +63,24 @@ def _int_arg(data: str | None, index: int) -> int | None:
         return int((data or "").split(":")[index])
     except (IndexError, ValueError):
         return None
+
+
+def _optional_int(value: str | None) -> int | None:
+    """Число из аргумента команды или None, если это не число."""
+    if value is None or not value.isdigit():
+        return None
+    return int(value)
+
+
+def _is_admin(message: Message, admin_ids: set[int]) -> bool:
+    """Служебная команда: остальным не отвечаем вовсе."""
+    user = message.from_user
+    return user is not None and user.id in admin_ids
+
+
+def _command_args(message: Message) -> list[str]:
+    """Аргументы команды без самой команды."""
+    return (message.text or "").split()[1:]
 
 
 async def _own_summary(
@@ -177,9 +211,61 @@ async def cancel(message: Message, state: FSMContext) -> None:
     await message.answer("Отменено.", reply_markup=kb.main_menu())
 
 
+# ---------- Служебные команды ----------
+@router.message(Command("grant"))
+async def grant_subscription(
+    message: Message,
+    user_service: UserService,
+    payment_service: PaymentService,
+    admin_ids: set[int],
+) -> None:
+    """Выдать подписку: /grant [user_id] [дней] — по умолчанию себе на 3650."""
+    user = message.from_user
+    if user is None or not _is_admin(message, admin_ids):
+        return
+    args = _command_args(message)
+    target_id = _optional_int(args[0]) if args else None
+    days = _optional_int(args[1]) if len(args) > 1 else None
+    if (
+        len(args) > 2
+        or (args and target_id is None)
+        or (len(args) > 1 and (days is None or days <= 0))
+    ):
+        await message.answer(GRANT_USAGE)
+        return
+    target = user.id if target_id is None else target_id
+    await user_service.ensure_user(target)
+    paid_until = await payment_service.grant(target, days)
+    await message.answer(granted_text(target, paid_until))
+
+
+@router.message(Command("revoke"))
+async def revoke_subscription(
+    message: Message,
+    payment_service: PaymentService,
+    admin_ids: set[int],
+) -> None:
+    """Снять подписку: /revoke [user_id]."""
+    user = message.from_user
+    if user is None or not _is_admin(message, admin_ids):
+        return
+    args = _command_args(message)
+    target_id = _optional_int(args[0]) if args else None
+    if len(args) > 1 or (args and target_id is None):
+        await message.answer(REVOKE_USAGE)
+        return
+    target = user.id if target_id is None else target_id
+    await payment_service.revoke(target)
+    await message.answer(revoked_text(target))
+
+
 # ---------- Мой план ----------
 @router.message(F.text == kb.MENU_PLAN, StateFilter(None))
-async def show_plan(message: Message, user_service: UserService) -> None:
+async def show_plan(
+    message: Message,
+    user_service: UserService,
+    payment_service: PaymentService,
+) -> None:
     goal = await user_service.get_goal(message.from_user.id)
     if goal is None:
         await message.answer(
@@ -187,15 +273,124 @@ async def show_plan(message: Message, user_service: UserService) -> None:
             reply_markup=kb.main_menu(),
         )
         return
+    user_id = message.from_user.id
+    active = await payment_service.is_subscribed(user_id)
+    paid_until = await payment_service.paid_until(user_id) if active else None
     await message.answer(
-        f"Ваша цель на день:\n{macros_str(goal)}",
+        f"Ваша цель на день:\n{macros_str(goal)}\n\n{subscription_line(paid_until)}",
         reply_markup=kb.main_menu(),
+    )
+
+
+# ---------- Подписка ----------
+@router.message(F.text == kb.MENU_SUBSCRIBE, StateFilter(None))
+async def subscribe(
+    message: Message,
+    payment_service: PaymentService,
+    payments_settings: PaymentsSettings,
+) -> None:
+    """Состояние подписки и кнопка оплаты звёздами."""
+    user_id = message.from_user.id
+    await message.answer(
+        subscription_text(
+            paid_until=await payment_service.paid_until(user_id),
+            active=await payment_service.is_subscribed(user_id),
+            price=payments_settings.price,
+            days=payments_settings.days,
+            free_notes=payments_settings.free_notes,
+            free_meals=payments_settings.free_meals,
+        ),
+        reply_markup=kb.pay_button(payments_settings.price),
+    )
+
+
+@router.callback_query(F.data == kb.PAY_CALLBACK)
+async def pay_subscribe_cb(
+    callback: CallbackQuery,
+    payment_service: PaymentService,
+    payments_settings: PaymentsSettings,
+) -> None:
+    """Выставить счёт на подписку (Telegram Stars)."""
+    payment = await payment_service.start(
+        callback.from_user.id,
+        payments_settings.price,
+        payments_settings.currency,
+        payments_settings.days,
+    )
+    await callback.answer()
+    await callback.message.answer_invoice(
+        title=payments_settings.title,
+        description=payments_settings.description,
+        payload=payment.payload,
+        provider_token=payments_settings.provider_token,
+        currency=payments_settings.currency,
+        prices=[
+            LabeledPrice(
+                label=payments_settings.title, amount=payments_settings.price
+            )
+        ],
+    )
+
+
+@router.pre_checkout_query()
+async def pre_checkout(
+    query: PreCheckoutQuery, payment_service: PaymentService
+) -> None:
+    """Подтверждение счёта: Telegram ждёт ответ не дольше 10 секунд."""
+    ok, error = await payment_service.check_precheckout(
+        query.from_user.id,
+        query.invoice_payload,
+        query.total_amount,
+        query.currency,
+    )
+    await query.answer(ok=ok, error_message=None if ok else error)
+
+
+@router.message(F.successful_payment)
+async def payment_done(
+    message: Message,
+    payment_service: PaymentService,
+    user_service: UserService,
+) -> None:
+    """Оплата прошла: фиксируем платёж и продлеваем подписку."""
+    successful = message.successful_payment
+    user = message.from_user
+    if successful is None or user is None:
+        return
+    # Запись пользователя нужна для сохранения срока подписки.
+    await user_service.ensure_user(user.id)
+    paid_until = await payment_service.confirm(
+        user.id,
+        successful.invoice_payload,
+        successful.telegram_payment_charge_id,
+        successful.provider_payment_charge_id,
+    )
+    if paid_until is None:
+        logger.warning(
+            "Оплата по счёту %s не применена: счёт не найден или уже оплачен",
+            successful.invoice_payload,
+        )
+        return
+    await message.answer(
+        payment_success_text(paid_until), reply_markup=kb.main_menu()
     )
 
 
 # ---------- Новая заметка ----------
 @router.message(F.text == kb.MENU_NEW_NOTE, StateFilter(None))
-async def new_note(message: Message, note_service: NoteService) -> None:
+async def new_note(
+    message: Message,
+    note_service: NoteService,
+    payment_service: PaymentService,
+    payments_settings: PaymentsSettings,
+) -> None:
+    """Новая заметка — в бесплатном тарифе их ограниченное число."""
+    if not await payment_service.can_create_note(message.from_user.id):
+        await message.answer(
+            note_limit_text(payments_settings.free_notes),
+            reply_markup=kb.pay_button(payments_settings.price),
+        )
+        return
     note = await note_service.start_new_note(message.from_user.id)
     await _show_note(message, note_service, note.id)
 
@@ -322,11 +517,20 @@ async def add_food(
     user_service: UserService,
     note_service: NoteService,
     food_service: FoodService,
+    payment_service: PaymentService,
+    payments_settings: PaymentsSettings,
 ) -> None:
     await user_service.register(message.from_user.id, message.from_user.username)
     if not await _has_goal(message, user_service, state):
         return
     if await _need_note_choice(message, note_service):
+        return
+    note = await note_service.get_current_note(message.from_user.id)
+    if not await payment_service.can_add_meal(message.from_user.id, note.id):
+        await message.answer(
+            meal_limit_text(payments_settings.free_meals),
+            reply_markup=kb.pay_button(payments_settings.price),
+        )
         return
     text = message.text.strip()
 

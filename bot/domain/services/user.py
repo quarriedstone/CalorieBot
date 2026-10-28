@@ -19,6 +19,11 @@ class UserService:
     async def register(self, user_id: int, username: str | None) -> None:
         await self._db.upsert_user(user_id, username)
 
+    async def ensure_user(self, user_id: int) -> None:
+        """Создать запись пользователя, если её ещё нет (имя не трогаем)."""
+        if await self._db.get_user(user_id) is None:
+            await self._db.upsert_user(user_id, None)
+
     async def get_goal(self, user_id: int) -> Macros | None:
         user = await self._db.get_user(user_id)
         return None if user is None else user.goal

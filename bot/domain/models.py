@@ -54,12 +54,39 @@ class NoteInfo(BaseModel):
 
 
 class User(BaseModel):
-    """Пользователь: имя, цель КБЖУ и выбранная заметка."""
+    """Пользователь: имя, цель КБЖУ и выбранная заметка.
+
+    ``paid_until`` — ISO-время окончания подписки (UTC) или ``None``, если
+    подписки нет; сравнение с текущим временем делает сервис платежей.
+    """
 
     id: int
     username: str | None = None
     goal: Macros | None = None
     active_note_id: int | None = None
+    paid_until: str | None = None
+
+
+class Payment(BaseModel):
+    """Счёт на подписку и его оплата.
+
+    ``payload`` — метка счёта, которую Telegram возвращает в
+    ``pre_checkout_query`` и ``successful_payment``; ``status`` — ``pending``
+    до подтверждения оплаты и ``paid`` после; ``telegram_charge_id`` — id
+    платежа Telegram (по нему же делаются возвраты).
+    """
+
+    id: int
+    user_id: int
+    payload: str
+    amount: int
+    currency: str
+    days: int
+    status: str = "pending"
+    telegram_charge_id: str | None = None
+    provider_charge_id: str | None = None
+    created_at: str | None = None
+    paid_at: str | None = None
 
 
 class NoteSummary(BaseModel):

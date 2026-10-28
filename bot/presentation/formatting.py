@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from bot.domain.models import AddFoodResult, DeleteMealResult, Food, Macros, NoteSummary
 
 HELP_TEXT = (
@@ -16,6 +18,8 @@ HELP_TEXT = (
     "следующие продукты сохранятся в неё.\n\n"
     "Удалить лишнюю запись — кнопка «🗑 Удалить продукт» на карточке "
     "заметки, всю заметку — кнопка «🗑 Удалить заметку» в меню.\n\n"
+    "💎 Кнопка «💎 Подписка» снимает лимиты на число заметок и записей; "
+    "бесплатный тариф и статус подписки видны там же.\n\n"
     "❗️ Без заметки продукты не добавляются: первую создайте кнопкой "
     "«📝 Новая заметка», а если заметка не выбрана — выберите её из списка."
 )
@@ -32,6 +36,9 @@ NO_GOAL_PROMPT = f"{NO_GOAL_TEXT}\n\n{GOAL_PROMPT}"
 DELETE_PROMPT = "🗑 Выберите продукт для удаления:"
 
 SELECT_NOTE_PROMPT = "📅 Сначала выберите заметку — нажмите на нужную в списке ниже."
+
+GRANT_USAGE = "Использование: /grant [user_id] [дней]"
+REVOKE_USAGE = "Использование: /revoke [user_id]"
 
 
 def history_text(page: int = 0) -> str:
@@ -92,6 +99,70 @@ def confirm_note_delete_text(summary: NoteSummary) -> str:
 
 def note_deleted_text(label: str) -> str:
     return f"🗑 Заметка {label} удалена."
+
+
+def _date(value: str | None) -> str:
+    """Дата из ISO-времени в формате ДД.ММ.ГГГГ."""
+    if not value:
+        return "—"
+    try:
+        return datetime.fromisoformat(value).strftime("%d.%m.%Y")
+    except ValueError:
+        return value
+
+
+def subscription_text(
+    paid_until: str | None,
+    active: bool,
+    price: int,
+    days: int,
+    free_notes: int,
+    free_meals: int,
+) -> str:
+    """Текст раздела «💎 Подписка»."""
+    status = f"активна до {_date(paid_until)}" if active else "не активна"
+    return (
+        "💎 Подписка\n\n"
+        f"Статус: {status}\n"
+        f"Стоимость: {days} дней за {price} ⭐\n\n"
+        f"Бесплатно: заметок — {free_notes}, "
+        f"записей в каждой — до {free_meals}."
+    )
+
+
+def subscription_line(paid_until: str | None) -> str:
+    """Строка статуса подписки для «ℹ️ Мой план»."""
+    if paid_until is None:
+        return "💎 Подписка: не активна"
+    return f"💎 Подписка: до {_date(paid_until)}"
+
+
+def note_limit_text(free_notes: int) -> str:
+    """Paywall: закончились бесплатные заметки."""
+    return (
+        f"🔒 Бесплатно доступно не больше {free_notes} заметок.\n"
+        "Подписка снимает лимит — оформить можно кнопкой ниже."
+    )
+
+
+def meal_limit_text(free_meals: int) -> str:
+    """Paywall: закончились бесплатные записи в заметке."""
+    return (
+        f"🔒 В бесплатной заметке не больше {free_meals} записей.\n"
+        "Подписка снимает лимит — оформить можно кнопкой ниже."
+    )
+
+
+def payment_success_text(paid_until: str) -> str:
+    return f"✅ Оплата прошла!\n💎 Подписка активна до {_date(paid_until)}."
+
+
+def granted_text(user_id: int, paid_until: str) -> str:
+    return f"✅ Подписка {user_id} активна до {_date(paid_until)}."
+
+
+def revoked_text(user_id: int) -> str:
+    return f"🚫 Подписка {user_id} снята."
 
 
 def not_found_text(query: str) -> str:
