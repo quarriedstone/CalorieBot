@@ -47,12 +47,38 @@ def cancel_menu() -> ReplyKeyboardMarkup:
     )
 
 
-def history_menu(notes: list[NoteInfo]) -> InlineKeyboardMarkup:
-    buttons = [
+HISTORY_PAGE_SIZE = 5
+
+
+def history_menu(
+    notes: list[NoteInfo], page: int = 0, has_next: bool = False
+) -> InlineKeyboardMarkup:
+    """Список заметок с прокруткой.
+
+    Заметки идут от новых к старым: страница 0 — самые свежие. На странице
+    не больше ``HISTORY_PAGE_SIZE`` заметок; если есть соседние страницы,
+    снизу появляется строка «⬅️ Назад» / «Далее ➡️».
+    """
+    rows = [
         [InlineKeyboardButton(text=f"📅 {n.label}", callback_data=f"note:{n.id}")]
         for n in notes
     ]
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
+    nav: list[InlineKeyboardButton] = []
+    if page > 0:
+        nav.append(
+            InlineKeyboardButton(
+                text="⬅️ Назад", callback_data=f"notepage:{page - 1}"
+            )
+        )
+    if has_next:
+        nav.append(
+            InlineKeyboardButton(
+                text="Далее ➡️", callback_data=f"notepage:{page + 1}"
+            )
+        )
+    if nav:
+        rows.append(nav)
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def note_actions(note_id: int) -> InlineKeyboardMarkup:

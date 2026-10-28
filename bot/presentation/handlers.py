@@ -8,7 +8,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 
-from bot.domain.models import NoteSummary
+from bot.domain.models import NoteInfo, NoteSummary
 from bot.domain.services import (
     FoodNotFoundError,
     FoodService,
@@ -27,6 +27,7 @@ from bot.presentation.formatting import (
     confirm_note_delete_text,
     delete_prompt_text,
     deleted_text,
+    history_text,
     macros_str,
     not_found_text,
     note_deleted_text,
@@ -62,6 +63,23 @@ async def _own_summary(
     return summary
 
 
+async def _history_page(
+    note_service: NoteService, user_id: int, page: int
+) -> tuple[list[NoteInfo], bool]:
+    """Страница истории заметок и признак «есть ещё более старые».
+
+    Берётся на одну заметку больше, чем помещается на страницу: если лишняя
+    нашлась — значит, дальше есть что показывать.
+    """
+    page = max(page, 0)
+    notes = await note_service.get_history(
+        user_id,
+        kb.HISTORY_PAGE_SIZE + 1,
+        page * kb.HISTORY_PAGE_SIZE,
+    )
+    return notes[: kb.HISTORY_PAGE_SIZE], len(notes) > kb.HISTORY_PAGE_SIZE
+
+
 async def _need_note_choice(message: Message, note_service: NoteService) -> bool:
     """Блокирует действие, пока заметка не создана и не выбрана.
 
@@ -72,11 +90,14 @@ async def _need_note_choice(message: Message, note_service: NoteService) -> bool
     user_id = message.from_user.id
     if await note_service.get_selected_note(user_id) is not None:
         return False
-    notes = await note_service.get_history(user_id, 5)
+    notes, has_next = await _history_page(note_service, user_id, 0)
     if not notes:
         await message.answer(NO_NOTE_PROMPT, reply_markup=kb.main_menu())
         return True
-    await message.answer(SELECT_NOTE_PROMPT, reply_markup=kb.history_menu(notes))
+    await message.answer(
+        SELECT_NOTE_PROMPT,
+        reply_markup=kb.history_menu(notes, 0, has_next),
+    )
     return True
 
 
@@ -223,7 +244,7 @@ async def delete_note_cb(callback: CallbackQuery, note_service: NoteService) -> 
         return
     await callback.answer("Заметка удалена")
     text = note_deleted_text(note.label)
-    notes = await note_service.get_history(user_id, 5)
+    notes, has_next = await _history_page(note_service, user_id, 0)
     if not notes:
         await callback.message.edit_text(
             f"{text}\n\nНовая заметка создастся по кнопке «📝 Новая заметка».",
@@ -232,18 +253,46 @@ async def delete_note_cb(callback: CallbackQuery, note_service: NoteService) -> 
         return
     await callback.message.edit_text(
         f"{text}\n\nВыберите заметку заново — из истории:",
-        reply_markup=kb.history_menu(notes),
+        reply_markup=kb.history_menu(notes, 0, has_next),
     )
 
 
 # ---------- Выбор заметки ----------
 @router.message(F.text == kb.MENU_HISTORY, StateFilter(None))
 async def history(message: Message, note_service: NoteService) -> None:
-    notes = await note_service.get_history(message.from_user.id, 5)
+    notes, has_next = await _history_page(note_service, message.from_user.id, 0)
     if not notes:
         await message.answer("Заметок пока нет.", reply_markup=kb.main_menu())
         return
-    await message.answer("Последние заметки:", reply_markup=kb.history_menu(notes))
+    await message.answer(
+        history_text(),
+        reply_markup=kb.history_menu(notes, 0, has_next),
+    )
+
+
+@router.callback_query(F.data.startswith("notepage:"))
+async def history_page_cb(
+    callback: CallbackQuery, note_service: NoteService
+) -> None:
+    """Прокрутка списка заметок кнопками «⬅️ Назад» / «Далее ➡️»."""
+    page = _int_arg(callback.data, 1)
+    if page is None or page < 0:
+        await callback.answer("Неверный запрос.")
+        return
+    user_id = callback.from_user.id
+    notes, has_next = await _history_page(note_service, user_id, page)
+    # Заметок стало меньше, чем страниц: откатываемся к последней непустой.
+    while page > 0 and not notes:
+        page -= 1
+        notes, has_next = await _history_page(note_service, user_id, page)
+    if not notes:
+        await callback.answer("Заметок пока нет.")
+        return
+    await callback.answer()
+    await callback.message.edit_text(
+        history_text(page),
+        reply_markup=kb.history_menu(notes, page, has_next),
+    )
 
 
 @router.callback_query(F.data.startswith("note:"))

@@ -106,7 +106,10 @@ class DatabaseAdapter(DatabaseInterface):
             else NoteInfo.model_validate(row, from_attributes=True)
         )
 
-    async def get_last_notes(self, user_id: int, limit: int = 5) -> list[NoteInfo]:
+    async def get_last_notes(
+        self, user_id: int, limit: int = 5, offset: int = 0
+    ) -> list[NoteInfo]:
+        """Заметки от новых к старым: ``offset`` пропускает уже показанные."""
         async with self._session() as session:
             rows = (
                 await session.scalars(
@@ -114,6 +117,7 @@ class DatabaseAdapter(DatabaseInterface):
                     .where(tables.Note.user_id == user_id)
                     .order_by(tables.Note.id.desc())
                     .limit(limit)
+                    .offset(offset)
                 )
             ).all()
         return [NoteInfo.model_validate(row, from_attributes=True) for row in rows]

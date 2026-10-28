@@ -51,8 +51,11 @@ class NoteService:
             return None
         return await self._own_note(user_id, user.active_note_id)
 
-    async def get_history(self, user_id: int, limit: int = 5) -> list[NoteInfo]:
-        return await self._db.get_last_notes(user_id, limit)
+    async def get_history(
+        self, user_id: int, limit: int = 5, offset: int = 0
+    ) -> list[NoteInfo]:
+        """История заметок от новых к старым; ``offset`` — для прокрутки."""
+        return await self._db.get_last_notes(user_id, limit, offset)
 
     async def delete_note(self, user_id: int, note_id: int) -> NoteInfo | None:
         """Удалить заметку пользователя вместе с записями.
