@@ -119,7 +119,9 @@ class NoteService:
         date = self._today()
         count = await self._db.count_notes(user_id, date)
         label = date if not count else f"{date} ({count + 1})"
-        return await self._db.add_note(user_id, date, label)
+        note = await self._db.add_note(user_id, date, label)
+        await self._db.record_note_created(user_id, date)
+        return note
 
     async def _latest_note(self, user_id: int) -> NoteInfo | None:
         notes = await self._db.get_last_notes(user_id, 1)

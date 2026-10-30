@@ -17,10 +17,12 @@ from bot.domain.models import NoteInfo, NoteSummary
 from bot.domain.services import (
     FoodNotFoundError,
     FoodService,
+    FoodValueError,
     NoteService,
     PaymentService,
     UserService,
 )
+from bot.domain.services.food import MAX_WEIGHT
 from bot.presentation import keyboards as kb
 from bot.presentation.formatting import (
     GOAL_PROMPT,
@@ -37,6 +39,7 @@ from bot.presentation.formatting import (
     deleted_text,
     granted_text,
     history_text,
+    invalid_food_text,
     macros_str,
     meal_limit_text,
     not_found_text,
@@ -535,7 +538,11 @@ async def add_food(
     text = message.text.strip()
 
     # «круассан 60 10,15,40» — точный расчёт без обращения к API.
-    result = await food_service.try_add_exact(message.from_user.id, text)
+    try:
+        result = await food_service.try_add_exact(message.from_user.id, text)
+    except FoodValueError:
+        await message.answer(invalid_food_text(MAX_WEIGHT))
+        return
     if result is not None:
         await message.answer(added_text(result))
         await _show_note(message, note_service, result.note.id)
@@ -547,6 +554,9 @@ async def add_food(
         result = await food_service.add_via_ai(message.from_user.id, text)
     except FoodNotFoundError:
         await processing.edit_text(not_found_text(text))
+        return
+    except FoodValueError:
+        await processing.edit_text(invalid_food_text(MAX_WEIGHT))
         return
     except Exception:
         logger.exception("Ошибка при обращении к DeepSeek")

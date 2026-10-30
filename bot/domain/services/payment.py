@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from uuid import uuid4
 
 from bot.domain.models import Payment
@@ -25,7 +25,7 @@ class PaymentService:
     def __init__(
         self,
         db: DatabaseInterface,
-        free_notes: int = 3,
+        free_notes: int = 3,  # заметок в сутки
         free_meals: int = 10,
         grant_days: int = 3650,
     ) -> None:
@@ -108,10 +108,16 @@ class PaymentService:
         return until is not None and until > self._now()
 
     async def can_create_note(self, user_id: int) -> bool:
-        """Можно ли создать ещё одну заметку (подписка снимает лимит)."""
+        """Можно ли создать ещё одну заметку сегодня (подписка снимает лимит).
+
+        Считаются все заметки, созданные за сутки, в том числе удалённые:
+        иначе лимит обходится циклом «создать → удалить».
+        """
         if await self.is_subscribed(user_id):
             return True
-        return await self._db.count_user_notes(user_id) < self.free_notes
+        user = await self._db.get_user(user_id)
+        created = 0 if user is None else user.notes_created_on(self._today())
+        return created < self.free_notes
 
     async def can_add_meal(self, user_id: int, note_id: int) -> bool:
         """Можно ли добавить запись в заметку (подписка снимает лимит)."""
@@ -140,6 +146,11 @@ class PaymentService:
         except ValueError:
             return None
         return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
+
+    @staticmethod
+    def _today() -> str:
+        """Сегодняшняя дата в формате ISO — как у заметок."""
+        return date.today().isoformat()
 
     @staticmethod
     def _now() -> datetime:

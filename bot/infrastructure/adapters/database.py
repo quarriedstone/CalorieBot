@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from sqlalchemy import delete, func, insert, select, update
+from sqlalchemy import case, delete, func, insert, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -154,15 +154,32 @@ class DatabaseAdapter(DatabaseInterface):
             await session.execute(delete(tables.Note).where(tables.Note.id == note_id))
             await session.commit()
 
-    async def count_user_notes(self, user_id: int) -> int:
-        """Сколько всего заметок у пользователя (для лимитов тарифа)."""
+    async def record_note_created(self, user_id: int, day: str) -> None:
+        """Учесть созданную заметку в дневном счётчике (для лимитов тарифа).
+
+        Счётчик относится к дате ``notes_day``: в новую дату он начинается
+        заново с 1. Если пользователя ещё нет, запись создаётся.
+        """
+        stmt = sqlite_insert(tables.User).values(
+            id=user_id, notes_day=day, notes_created=1
+        )
         async with self._session() as session:
-            count = await session.scalar(
-                select(func.count())
-                .select_from(tables.Note)
-                .where(tables.Note.user_id == user_id)
+            await session.execute(
+                stmt.on_conflict_do_update(
+                    index_elements=[tables.User.id],
+                    set_={
+                        "notes_created": case(
+                            (
+                                tables.User.notes_day == day,
+                                tables.User.notes_created + 1,
+                            ),
+                            else_=1,
+                        ),
+                        "notes_day": day,
+                    },
+                )
             )
-        return count or 0
+            await session.commit()
 
     # ---------- meals ----------
     async def add_meal(self, note_id: int, food: Food) -> None:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from datetime import datetime
 
 from bot.domain.models import AddFoodResult, DeleteMealResult, Food, Macros, NoteSummary
@@ -55,6 +56,9 @@ NO_NOTE_PROMPT = (
 
 
 def fmt(value: float) -> str:
+    if not math.isfinite(value):
+        # inf/nan из старых записей: int() на них падает и роняет всю карточку
+        return "—"
     return f"{value:.0f}" if value == int(value) else f"{value:.1f}"
 
 
@@ -125,7 +129,7 @@ def subscription_text(
         "💎 Подписка\n\n"
         f"Статус: {status}\n"
         f"Стоимость: {days} дней за {price} ⭐\n\n"
-        f"Бесплатно: заметок — {free_notes}, "
+        f"Бесплатно: заметок — {free_notes} в сутки, "
         f"записей в каждой — до {free_meals}."
     )
 
@@ -140,8 +144,17 @@ def subscription_line(paid_until: str | None) -> str:
 def note_limit_text(free_notes: int) -> str:
     """Paywall: закончились бесплатные заметки."""
     return (
-        f"🔒 Бесплатно доступно не больше {free_notes} заметок.\n"
+        f"🔒 Бесплатно можно создать не больше {free_notes} заметок в сутки "
+        "(удалённые тоже считаются). Новые будут доступны завтра.\n"
         "Подписка снимает лимит — оформить можно кнопкой ниже."
+    )
+
+
+def invalid_food_text(max_weight: float) -> str:
+    """Вес или Б/Ж/У вне разумных пределов — запись не добавлена."""
+    return (
+        "⚠️ Слишком большие числа — запись не добавлена.\n"
+        f"Вес порции — до {max_weight:g} г, Б/Ж/У на 100 г — не больше 100."
     )
 
 

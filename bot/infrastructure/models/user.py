@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import REAL, Text, text
+from sqlalchemy import REAL, Integer, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from bot.domain.models import Macros
@@ -18,6 +18,8 @@ class User(Base):
     ``active_note_id`` — без внешнего ключа: в схеме это обычная колонка,
     а ссылка на заметку проверяется в доменных сервисах.
     ``paid_until`` — ISO-время окончания подписки (UTC) или ``NULL``.
+    ``notes_day`` / ``notes_created`` — сколько заметок создано в эту дату
+    (удаление счётчик не уменьшает).
     """
 
     __tablename__ = "users"
@@ -30,6 +32,8 @@ class User(Base):
     goal_carbs: Mapped[float | None] = mapped_column(REAL())
     active_note_id: Mapped[int | None] = mapped_column()
     paid_until: Mapped[str | None] = mapped_column(Text())
+    notes_day: Mapped[str | None] = mapped_column(Text())
+    notes_created: Mapped[int] = mapped_column(Integer(), server_default=text("0"))
     created_at: Mapped[str] = mapped_column(
         Text(), server_default=text("(datetime('now'))")
     )
