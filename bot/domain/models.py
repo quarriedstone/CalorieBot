@@ -58,6 +58,8 @@ class User(BaseModel):
 
     ``paid_until`` — ISO-время окончания подписки (UTC) или ``None``, если
     подписки нет; сравнение с текущим временем делает сервис платежей.
+    ``notes_created`` — сколько заметок создано в дату ``notes_day``
+    (для дневного лимита; удаление заметки его не уменьшает).
     """
 
     id: int
@@ -65,6 +67,12 @@ class User(BaseModel):
     goal: Macros | None = None
     active_note_id: int | None = None
     paid_until: str | None = None
+    notes_day: str | None = None
+    notes_created: int = 0
+
+    def notes_created_on(self, day: str) -> int:
+        """Сколько заметок создано в дату ``day`` (ISO)."""
+        return self.notes_created if self.notes_day == day else 0
 
 
 class Payment(BaseModel):

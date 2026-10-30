@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import math
 import re
 
 from bot.domain.models import Macros
 from bot.domain.services.interfaces import DatabaseInterface
 
 __all__ = ["UserService"]
+
+# Больше 2 кг белка/жиров/углеводов в сутки — опечатка, а не цель.
+MAX_GOAL_GRAMS = 2_000.0
 
 
 class UserService:
@@ -43,7 +47,9 @@ class UserService:
         if values is None:
             # «120,60,220» — запятая как разделитель
             values = self._goal_numbers(text, r"\s*,\s*")
-        if values is None or any(v < 0 for v in values):
+        if values is None or any(
+            not math.isfinite(v) or not 0 <= v <= MAX_GOAL_GRAMS for v in values
+        ):
             return None
         protein, fat, carbs = values
         return Macros.from_nutrients(protein, fat, carbs)

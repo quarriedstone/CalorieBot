@@ -6,7 +6,11 @@
 
 from __future__ import annotations
 
-from bot.domain.services.food import FoodNotFoundError, FoodService
+from bot.domain.services.food import (
+    FoodNotFoundError,
+    FoodService,
+    FoodValueError,
+)
 from bot.domain.services.note import NoteService
 from bot.domain.services.payment import PaymentService
 from bot.domain.services.user import UserService
@@ -14,6 +18,7 @@ from bot.domain.services.user import UserService
 __all__ = [
     "FoodNotFoundError",
     "FoodService",
+    "FoodValueError",
     "NoteService",
     "PaymentService",
     "UserService",

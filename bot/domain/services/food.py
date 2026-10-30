@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import math
 import re
 
 from bot.domain.models import (
+    CALORIES_PER_FAT,
     AddFoodResult,
     Food,
     Macros,
@@ -15,7 +17,14 @@ from bot.domain.services.interfaces import DatabaseInterface
 from bot.domain.services.note import NoteService
 from bot.infrastructure.adapters.deepseek import DeepSeekAdapter
 
-__all__ = ["FoodNotFoundError", "FoodService"]
+__all__ = ["FoodNotFoundError", "FoodService", "FoodValueError"]
+
+# Максимальный вес порции (г): больше — опечатка, а не еда.
+MAX_WEIGHT = 10_000.0
+# Б/Ж/У на 100 г не могут превышать 100 г.
+MAX_PER_100 = 100.0
+# Калорийность порции не выше MAX_WEIGHT граммов чистого жира.
+MAX_CALORIES = MAX_WEIGHT * CALORIES_PER_FAT
 
 # Число: целое или дробное с запятой/точкой (60, 62.5, 82,5)
 _NUM = r"\d+(?:[.,]\d+)?"
@@ -49,6 +58,10 @@ class FoodNotFoundError(Exception):
         self.query = query
 
 
+class FoodValueError(ValueError):
+    """Вес или КБЖУ вне разумных пределов (например, «курица 99999999»)."""
+
+
 class FoodService:
     """Добавление блюда: точный расчёт по БЖУ или оценка через DeepSeek."""
 
@@ -72,6 +85,7 @@ class FoodService:
         даже если запятая в дроби выглядит как разделитель.
 
         Возвращает None, если текст не подходит ни под один формат.
+        Бросает :class:`FoodValueError`, если числа вне разумных пределов.
         """
         structured = self._parse_structured(text)
         per100 = structured.per100 if structured is not None else None
@@ -107,7 +121,8 @@ class FoodService:
 
         Название берётся из ответа модели. Если модель вернула found=false
         (это не продукт питания), бросает :class:`FoodNotFoundError` —
-        запись в заметку не добавляется.
+        запись в заметку не добавляется. Если вес или ответ модели вне
+        разумных пределов — :class:`FoodValueError`.
         """
         structured = self._parse_structured(text)
         weight_hint = structured.weight if structured is not None else None
@@ -121,6 +136,9 @@ class FoodService:
             fat=float(parsed["fat"]),
             carbs=float(parsed["carbs"]),
         )
+        self._check_range(food.calories, MAX_CALORIES)
+        for value in (food.protein, food.fat, food.carbs):
+            self._check_range(value, MAX_WEIGHT)
         return await self._store(user_id, food)
 
     # ---------- внутренние методы ----------
@@ -149,12 +167,15 @@ class FoodService:
         weight = FoodService._to_num(match.group("weight"))
         if not name or weight is None or weight <= 0:
             return None
+        FoodService._check_range(weight, MAX_WEIGHT)
 
         protein = FoodService._to_num(match.group("p"))
         fat = FoodService._to_num(match.group("f"))
         carbs = FoodService._to_num(match.group("c"))
         if protein is None or fat is None or carbs is None:
             return StructuredFood(name=name, weight=weight)
+        for value in (protein, fat, carbs):
+            FoodService._check_range(value, MAX_PER_100)
 
         return StructuredFood(
             name=name,
@@ -183,6 +204,8 @@ class FoodService:
         if not any(char.isalpha() for char in name):
             # «1 2 3 4» — это не название продукта, такой ввод разбирает модель
             return None
+        for value in (protein, fat, carbs):
+            FoodService._check_range(value, MAX_WEIGHT)
 
         return PortionFood(name=name, protein=protein, fat=fat, carbs=carbs)
 
@@ -237,6 +260,16 @@ class FoodService:
             return f" {inner} "
 
         return re.sub(r"\s+", " ", _BRACKET_RE.sub(_replace, text)).strip()
+
+    @staticmethod
+    def _check_range(value: float, limit: float) -> None:
+        """Число конечно и не больше ``limit``, иначе :class:`FoodValueError`.
+
+        Без проверки «курица 99…9» превращается в ``inf``, который ломает
+        вывод заметки при каждом показе.
+        """
+        if not math.isfinite(value) or value > limit:
+            raise FoodValueError(value)
 
     @staticmethod
     def _to_num(value: str | None) -> float | None:
